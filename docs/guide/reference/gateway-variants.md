@@ -14,7 +14,7 @@ All three gateways are compose **profiles**; a single `COMPOSE_PROFILES` selecto
 |---|---|---|---|
 | **LiteLLM** (default) | `litellm` | Python + Postgres; the reference gateway with the richest budget/fallback/config surface | You want the full feature set, the RouteLLM 90/10 dial, per-tool virtual keys |
 | **Bifrost** | `bifrost` | Rust, µs-class overhead, native OTel, no Python/Postgres footprint | You want minimal gateway overhead + native tracing (addresses the LiteLLM Python-proxy [scale ceiling](limitations-and-mitigations.md)) |
-| **Helicone** | `helicone` | *(added in the Helicone phase)* | — |
+| **Helicone** | `helicone` | Rust, native OTel + rich budgets/caching; addresses via named routers (`/router/<tier>`) | You want Bifrost-class overhead **plus** dollar/token/request budgets and optional response caching |
 
 The shipped `.env` sets `COMPOSE_PROFILES=litellm`, so **`docker compose up -d` still yields LiteLLM** — no change for existing users.
 
@@ -68,4 +68,40 @@ Compare added gateway latency on your own hardware with the same local model:
 COMPOSE_PROFILES=litellm docker compose up -d && ./scripts/bench-gateway.sh   # baseline
 COMPOSE_PROFILES=bifrost docker compose up -d && ./scripts/bench-gateway.sh   # variant
 ```
-`scripts/bench-gateway.sh` reports p50/p95 over N `tier-fast` calls (local, ~$0 — measures gateway overhead, not spend).
+`scripts/bench-gateway.sh` reports p50/p95 over N `tier-fast` calls (local, ~$0). Read the overhead as the **delta** across variants on the same model — run it under each: `COMPOSE_PROFILES=helicone docker compose up -d && ./scripts/bench-gateway.sh`.
+
+---
+
+## 🧪 Helicone variant
+
+Helicone AI Gateway ([Helicone/ai-gateway](https://github.com/Helicone/ai-gateway), Rust, Apache-2.0) is a low-overhead, OpenAI-compatible gateway with **native OpenTelemetry + Prometheus** and — unlike Bifrost — **dollar/token/request budgets and optional response caching** built in. Config lives in [`helicone-config.yaml`](../../../helicone-config.yaml), which mirrors the four tiers as **named routers**.
+
+> [!IMPORTANT]
+> **Addressing differs.** Helicone routes by **router name**, so clients call `http://localhost:4000/router/tier-fast` rather than `POST /v1/chat/completions` with `model: "tier-fast"`. The tier *vocabulary* is preserved (the routers are named `tier-fast` / `tier-heavy` / `tier-frontier` / `tier-private`), but point your clients at the `/router/<tier>` path when this variant is active. Consequently the shipped **`smoke-test.sh` targets LiteLLM/Bifrost addressing and does not exercise Helicone** — use the `/router/<tier>` paths to test this variant.
+
+> [!WARNING]
+> **Privacy pin under Helicone — validated by config, NOT by the shipped smoke test.** The `tier-private` router load-balances over a **single local model, with no other models and no fallback** (and the config has no global fallback block), so it cannot escalate off-box — by construction. **Caveat:** `smoke-test.sh` uses LiteLLM/Bifrost `model=`-at-`/v1/chat/completions` addressing, so it does **not** exercise Helicone's `/router/<tier>` routes — re-running it under Helicone validates nothing. Validate the pin here by (a) inspecting `helicone-config.yaml` (`tier-private` = one local model) and (b) a direct call, asserting the resolved model is local:
+> ```bash
+> curl -sS http://localhost:4000/router/tier-private/chat/completions \
+>   -H "Content-Type: application/json" \
+>   -d '{"messages":[{"role":"user","content":"ping"}]}' | jq -r '.model'   # must be a LOCAL model
+> ```
+> The guarantee is **inviolable by design across every variant**; only its *validation path* differs.
+
+> [!NOTE]
+> **Host-native Ollama + experimental.** Like Bifrost, `helicone-config.yaml` hardcodes the ollama `base-url` (edit it for `--scale ollama=0` host setups), caching is left **off** (no Redis/S3 needed), and the image tag (`helicone/ai-gateway:v1.0.0`) + config schema must be verified against your Helicone release ([config reference](https://docs.helicone.ai/ai-gateway/config)).
+
+### Which gateway? — three-way comparison
+
+| | **LiteLLM** (default) | **Bifrost** | **Helicone** |
+|---|---|---|---|
+| Language / footprint | Python + Postgres | Rust, µs-class | Rust, µs-class |
+| Client addressing | `model: "tier-fast"` | `model: "tier-fast"` | `/router/tier-fast` |
+| Frontier budgets | ✅ USD per deployment | ◐ `budget` block | ✅ USD + token + request |
+| Response caching | via config | — | ✅ Redis/S3 (opt-in, off here) |
+| Native OTel / Prometheus | callback / `/metrics` | ✅ native | ✅ native |
+| Config | `litellm-config.yaml` | `bifrost-config.json` | `helicone-config.yaml` |
+| Maturity in this kit | **stable default** | experimental | experimental |
+| Privacy pin (`tier-private`) | no fallback chain | empty `fallbacks` | single-model router, no fallback |
+
+Pick **LiteLLM** for the richest, most-proven surface; **Bifrost** for the leanest overhead; **Helicone** when you want lean overhead *and* first-class budgets/caching.

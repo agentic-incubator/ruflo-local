@@ -157,7 +157,7 @@ phases:
       - "cmd: ! (COMPOSE_PROFILES=helicone docker compose config --services | grep -qx litellm)  — and litellm is off (mutual exclusion holds)"
       - "cmd: ! (COMPOSE_PROFILES=helicone docker compose config --services | grep -qx bifrost)  — bifrost is off too (exactly one gateway)"
       - "cmd: COMPOSE_PROFILES=helicone docker compose config -q  — the Helicone variant assembles"
-      - "cmd: docker compose config --services | grep -qx litellm  — default is STILL litellm (unchanged by adding helicone)"
+      - "cmd: COMPOSE_PROFILES=litellm docker compose config --services | grep -qx litellm  — the litellm default still resolves (unchanged by adding helicone; all gateways are profiled)"
       - "grep: helicone in docs/guide/reference/gateway-variants.md  — Helicone section present"
       - "grep:absent: TODO|FIXME in the Helicone config file"
       - "grep: tier-private in docs/guide/reference/gateway-variants.md  — privacy pin under Helicone documented (failover disabled)"

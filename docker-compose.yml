@@ -124,6 +124,30 @@ services:
     command: ["-app-dir", "/app/data"]
     restart: unless-stopped
 
+  # --- Alternative gateway: Helicone AI Gateway (Rust, native OTel + budgets/cache) ---
+  # Activate INSTEAD of litellm/bifrost:  COMPOSE_PROFILES=helicone docker compose up -d
+  # Mutually exclusive — claims host :4000 like the others. Mirrors the four tiers as
+  # named routers (clients call /router/tier-<x>); tier-private routes to one local
+  # model with no fallback (privacy pin). Listens :8080 internally, mapped to :4000.
+  # EXPERIMENTAL: verify the image tag + config schema against your Helicone release.
+  helicone:
+    image: helicone/ai-gateway:v1.0.0
+    container_name: helicone
+    profiles: ["helicone"]
+    depends_on:
+      - otel-collector
+    ports:
+      - "4000:8080"
+    volumes:
+      - ./helicone-config.yaml:/app/config.yaml:ro
+    environment:
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+      - OLLAMA_API_BASE=${OLLAMA_API_BASE:-http://ollama:11434}
+    command: ["--config", "/app/config.yaml"]
+    restart: unless-stopped
+
   # --- Optional: learned 90/10 router (RouteLLM, lm-sys) --------------------
   # Exposes an OpenAI-compatible endpoint that decides strong-vs-weak per
   # request. Point it AT LiteLLM so budgets/metrics still apply downstream.
