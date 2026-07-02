@@ -16,7 +16,7 @@ commands:
   # No formatter in this kit.
   format_check:    ""
   # Static validation of every config artifact (yamllint + shellcheck + json parse).
-  lint:            "yamllint -d relaxed docker-compose.yml litellm-config.yaml prometheus.yml grafana-datasources.yml && shellcheck smoke-test.sh && jq -e . ruflo-tiers.json >/dev/null"
+  lint:            "yamllint -d relaxed docker-compose.yml litellm-config.yaml prometheus.yml grafana-datasources.yml otel-collector-config.yaml && shellcheck smoke-test.sh scripts/*.sh && jq -e . ruflo-tiers.json router-policy.example.json >/dev/null"
   # No compile step; validate that the merged Compose file renders (the 'does it assemble' check).
   build:           "docker compose config -q"
   # No fast unit tests exist in this kit.

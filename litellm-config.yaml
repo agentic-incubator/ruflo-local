@@ -49,6 +49,12 @@ model_list:
   # ---- TIER 3: frontier (budget-capped; ≤10% of traffic by design) ---------
   # Multiple deployments under ONE alias ⇒ automatic failover between
   # Claude → GPT → Gemini if one provider errors or exhausts its budget.
+  # §4 budget-steering: per-deployment max_budget + HTTP-429-skip is the
+  # FAIL-CLOSED BACKSTOP (over-budget deployment skipped → failover → error when
+  # all exhausted). DEMOTION *before* hard-stop (50/75/90 rungs, mask at 100%
+  # except pinned/escalation-forced) is router-side — see scripts/budget-snapshot.sh
+  # and docs/guide/reference/budgets-and-tradeoffs.md → Budget-steered routing (§4).
+  # rpm/tpm below add token-rate burst protection alongside the USD cap.
   - model_name: tier-frontier
     litellm_params:
       model: anthropic/claude-opus-4-8
@@ -67,6 +73,8 @@ model_list:
       api_key: os.environ/OPENAI_API_KEY
       max_budget: 2.00
       budget_duration: 1d
+      rpm: 6                      # token-rate burst protection alongside the USD cap
+      tpm: 60000
     model_info:
       tier: frontier
       locality: cloud
@@ -77,6 +85,8 @@ model_list:
       api_key: os.environ/GEMINI_API_KEY
       max_budget: 2.00
       budget_duration: 1d
+      rpm: 6                      # token-rate burst protection alongside the USD cap
+      tpm: 60000
     model_info:
       tier: frontier
       locality: cloud

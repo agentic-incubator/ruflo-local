@@ -64,6 +64,39 @@ Give that key to the tool instead of the master key. (Also the cleanest multi-us
 Each frontier deployment carries `max_budget` + `budget_duration`. Cross the budget and the gateway stops sending to that deployment for the period — failing over to the next provider, then erroring only when all are exhausted. Spend state persists in Postgres across restarts. Rate caps (`rpm`/`tpm`) sit alongside as burst protection.
 
 > [!IMPORTANT]
-> Budgets **cap the damage** but don't *shape* the 90/10 ratio — only the learned router (Mechanism B in [Tiers & Routing](tiers-and-routing.md#-where-the-9010-comes-from)) targets a percentage. And budgets are observed, not consumed by routing — a genuinely hard task can still land on an exhausted tier. The mitigations for this are in [Limitations & Mitigations §4](limitations-and-mitigations.md#-4-budget-is-observed-not-consumed).
+> Budgets **cap the damage** but don't *shape* the 90/10 ratio — only the learned router (Mechanism B in [Tiers & Routing](tiers-and-routing.md#-where-the-9010-comes-from)) targets a percentage. And budgets are observed, not consumed by routing — a genuinely hard task can still land on an exhausted tier. The mitigations for this are below and in [Limitations & Mitigations §4](limitations-and-mitigations.md#-4-budget-is-observed-not-consumed).
+
+---
+
+## 🎚️ Budget-steered routing (§4)
+
+> **Status: shipped as gateway backstop + router-side snapshot.** Turns "budget observed" into "budget consumed by the routing decision" — so budget pressure **demotes** frontier candidates *before* the hard stop, instead of a hard task silently landing on an exhausted tier.
+
+Two layers, fail-closed:
+
+1. **Gateway backstop (LiteLLM, real today).** Each frontier deployment's `max_budget` + `budget_duration` makes the gateway **skip** an over-budget deployment and fail over; when all frontier deployments are exhausted the request errors with **HTTP 429**. This is the hard, fail-closed floor — it cannot overspend. `rpm`/`tpm` on every frontier deployment add token-rate burst protection alongside the USD cap.
+2. **Router-side demotion (consumes the snapshot).** [`scripts/budget-snapshot.sh`](../../../scripts/budget-snapshot.sh) emits JSON a router (e.g. ruflo `route()`) reads to apply a **demotion penalty** to frontier candidates across rising utilization, and to **mask** frontier entirely at 100% — *except* pinned or escalation-forced turns (quality-floor-beats-quota):
+
+| Governing utilization | `demotion_rung` | Effect on frontier candidates |
+|---|---|---|
+| `< 0.5` | `0` | none |
+| `0.5 – 0.75` | `0.25` | mild penalty |
+| `0.75 – 0.9` | `0.5` | strong penalty |
+| `0.9 – 1.0` | `0.75` | near-masked |
+| `≥ 1.0` | `mask` | excluded (pinned/escalation-forced bypass) |
+
+**Dual budget.** The snapshot tracks a **token** budget alongside **USD** (`FRONTIER_TOKEN_BUDGET` / `FRONTIER_USD_BUDGET`); the *tighter* of the two governs demotion, so a token blow-up throttles frontier even if the dollar cap has headroom. Feed it to your router on an interval:
+
+```bash
+GW=http://localhost:4000 ./scripts/budget-snapshot.sh   # → {usd, tokens, governing_utilization, demotion_rung, frontier_masked, metrics_available, ...}
+```
+
+The snapshot is **frontier-scoped** (only frontier deployments' spend/tokens count, via `FRONTIER_MODELS`), so the ~90% local traffic never skews the signal.
+
+> [!WARNING]
+> **Fail-closed on a bad scrape.** If `/metrics` is unreachable or erroring, `metrics_available` is `false` — the gateway may still be serving and spending (bounded only by the 429 cap), so a router should treat `false` as **demote/mask frontier**, not "0% used." And mind the **budget window**: `/metrics` spend counters may be *cumulative* while `max_budget` resets daily — set `FRONTIER_USD_BUDGET`/`FRONTIER_TOKEN_BUDGET` (or point `SPEND_METRIC`/`TOKEN_METRIC` at a period-aware remaining-budget gauge) to match the metric's window.
+
+> [!NOTE]
+> `tier-private` and the local tiers are **never** budget-steered — the snapshot's `scope` is `frontier` only. Local serving is ~$0 marginal; the privacy pin must never be perturbed by a budget signal.
 
 **Research context:** cascade/routing systems have repeatedly shown **50–98% cost reductions at matched quality** (FrugalGPT, arXiv:2305.05176; RouteLLM, arXiv:2406.18665). See [Resources](resources.md) for the full link set.
