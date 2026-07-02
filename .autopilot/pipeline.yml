@@ -192,19 +192,22 @@ phases:
       - "Cross-link pass across tiers-and-routing.md, observability.md, budgets-and-tradeoffs.md, resources.md, and the guide README so the new sections/scripts/gateway variants are discoverable."
       - "getting-started-technical.md (and nontechnical where relevant): a pointer to the strengthened-router options and the pluggable gateway variants (litellm default / bifrost / helicone)."
       - "NEW docs/guide/reference/prerequisites.md — ONE dedicated 'what you must install & configure' doc (single source of truth, NOT per-persona duplication), organized by NEED-TIER: (a) REQUIRED for everyone — Docker + Compose, Ollama (container or host), the gateway stack + .env keys; (b) OPTIONAL for the router mitigations — ruflo + ruvector, each with source/install steps, official links, and a `verify` command; (c) OPTIONAL for scale/GPU — vLLM; (d) OPTIONAL for QE — agentic-qe. Each entry says WHAT it is, WHY (which tier/feature/§ needs it), install steps + official link, and a verify command. Both getting-started-technical.md and getting-started-nontechnical.md link to it with persona-appropriate framing (technical → full list; non-technical → the 'Everyone' tier + a gentle pointer)."
+      - "NEW README.md at repo root — REALLY brief front door: a one-line value prop (local-first ~90/10 tiered LLM routing; privacy-pinned lane; budget-capped frontier; pluggable gateway) + a tiny 'quick start' pointer, then LINKS that delegate to the real docs (docs/guide/README.md hub, the two getting-started guides, prerequisites.md). No content duplication — it points in, it does not restate the guide."
     definition_of_done:
       - "grep: APPLIED|shipped|available in docs/guide/reference/limitations-and-mitigations.md  — status annotations present for the applied mitigations"
       - "grep: gateway-variants in docs/guide/reference/limitations-and-mitigations.md  — item #7 points at the variants guide"
       - "grep: helicone in docs/guide/reference/gateway-variants.md  — three-way comparison present"
       - "cmd: yamllint -d relaxed docker-compose.yml litellm-config.yaml prometheus.yml grafana-datasources.yml  — all configs still lint clean"
       - "cmd: docker compose config -q && COMPOSE_PROFILES=bifrost docker compose config -q && COMPOSE_PROFILES=helicone docker compose config -q  — all three gateway resolutions assemble"
-      - "cmd: docker compose config --services | grep -qx litellm  — litellm remains the default gateway"
+      - "cmd: COMPOSE_PROFILES=litellm docker compose config --services | grep -qx litellm  — litellm remains the default gateway (all gateways profiled)"
       - "cmd: test -f docs/guide/reference/prerequisites.md  — the dedicated prerequisites doc exists"
       - "grep: ruflo in docs/guide/reference/prerequisites.md  — ruflo install/source steps present"
       - "grep: ruvector in docs/guide/reference/prerequisites.md  — ruvector install/source steps present"
       - "grep: https:// in docs/guide/reference/prerequisites.md  — official install links present (well-formed)"
       - "grep:absent: TODO|FIXME|TBD in docs/guide/reference/prerequisites.md  — no unfinished placeholders"
       - "cmd: grep -l prerequisites docs/guide/getting-started-technical.md docs/guide/getting-started-nontechnical.md  — BOTH personas link the prereqs doc"
+      - "cmd: test -f README.md  — the root README front door exists"
+      - "grep: docs/guide in README.md  — README delegates to the guide (links in, no duplication)"
     conventions: "Mostly docs/coherence — no behavioral code changes. Preserve the house doc voice (emoji headings, '← Back' nav, callout blocks). Keep the honest-list honest: only mark a mitigation shipped if its phase actually landed it in-repo. For prerequisites.md: VALIDATE every external install link is live during this phase's adversarial review (WebFetch each URL; replace any dead/redirected link) — the gate greps for well-formed https links, but link-reachability is checked in review, not left to the reader. Mark each tool REQUIRED vs OPTIONAL and name the § / feature that needs it."
     depends_on: [1, 2, 3, 4, 5, 6, 7]
     adrs:  []

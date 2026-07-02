@@ -18,6 +18,7 @@ Slim topic pages the two guides link into. Read them in any order.
 
 | Page | What's inside |
 |---|---|
+| 🧰 **[Prerequisites](reference/prerequisites.md)** | What to install & configure — Docker, Ollama, the gateway, and the optional ruflo/ruvector/vLLM tiers |
 | 🖥️ **[Hardware & Models](reference/hardware-and-models.md)** | What your machine can run; which open-weight models to pick, with evidence, footprints, licenses |
 | 🧭 **[Tiers & Routing](reference/tiers-and-routing.md)** | The four tiers, the fall-through ladder, where the 90/10 split comes from, integrating your tools |
 | 💵 **[Budgets & Trade-offs](reference/budgets-and-tradeoffs.md)** | The trade-off matrix, config anatomy, tuning recipes, per-tool spending caps |

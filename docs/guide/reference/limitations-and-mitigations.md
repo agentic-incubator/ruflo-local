@@ -17,7 +17,7 @@
 4. **RouteLLM's default router phones home for embeddings** (OpenAI), and its checkpoints were trained on an older model generation — rankings still transfer per the paper, but treat it as a heuristic, not ground truth.
 5. **Ollama concurrency:** mostly sequential; multi-user or parallel-agent load queues. The vLLM profile solves it at the cost of NVIDIA-only + more setup.
 6. **Single-node, homelab-grade:** no HA, no multi-instance budget sync (that needs Redis), Postgres on the same box. Fine for a power user; not a company platform as-is.
-7. **LiteLLM is a Python proxy:** single-digit-ms overhead, wants periodic patching; at hundreds of RPS it becomes the bottleneck — far beyond personal use, but it's the known scale ceiling.
+7. **LiteLLM is a Python proxy:** single-digit-ms overhead, wants periodic patching; at hundreds of RPS it becomes the bottleneck — far beyond personal use, but it's the known scale ceiling. → **now mitigated in this kit:** drop-in [Bifrost & Helicone gateway variants](gateway-variants.md) (Rust, µs-class, native OTel), selectable via `COMPOSE_PROFILES` with no client change.
 8. **Quantization is not free:** Q4 GGUF weights trade measurable quality for memory; strict-format and long-context tasks feel it first. Prefer Q5/Q6 or AWQ when memory allows.
 9. **Maintenance is on you:** model updates, image updates, key rotation, disk for model blobs (tens of GB), and the weekly metrics review.
 
@@ -72,14 +72,14 @@ Adopt **OpenTelemetry GenAI semantic conventions** — `gen_ai.usage.input_token
 
 ## 🥇 Priority order
 
-| Priority | Move | Closes | Relative effort |
-|---|---|---|---|
-| **Now** | Enable the shipped neural router; add task-class/tool-calling escalation signal | §1, §2 | hours |
-| **Now** | Quality-regression harness in CI (`cost-counterfactual`) | §3 (detection) | ~1 pw |
-| **Next** | Budget-steered `route()` consuming `cost-summary` JSON | §4 | 1–1.5 pw |
-| **Next** | Share governor (calibrated α + EWMA/hysteresis) | §5, §6 | 1–2 pw |
-| **Then** | Explicit tier schema (clean locality/provenance) + OTel spans | §6, §7 | ~2 pw |
-| **Optional** | FrugalGPT-style swap-averaged verifier on designated task classes | §3 (correction) | ~1 pw |
+| Move | Closes | Status in this kit |
+|---|---|---|
+| Enable the shipped neural router; add task-class/tool-calling escalation signal | §1, §2 | ✅ **shipped** — [`router-policy.example.json`](../../../router-policy.example.json) + [Tiers & Routing §1/§2](tiers-and-routing.md#-strengthening-the-routing-signal-1-2) |
+| Quality-regression harness + FrugalGPT verify-then-escalate | §3 | ✅ **shipped** — [`scripts/quality-regression.sh`](../../../scripts/quality-regression.sh) + [`verify-escalate.sh`](../../../scripts/verify-escalate.sh) |
+| Budget-steered routing consuming a budget snapshot | §4 | ✅ **shipped** — [`scripts/budget-snapshot.sh`](../../../scripts/budget-snapshot.sh) + [Budgets §4](budgets-and-tradeoffs.md#-budget-steered-routing-4) |
+| OpenTelemetry GenAI spans + Prometheus surfaces | §7 | ✅ **shipped** — [Observability §7](observability.md#-opentelemetry-genai-spans-7) |
+| Pluggable low-overhead gateway (the LiteLLM ceiling, honest-list #7) | #7 | ✅ **shipped** — [Bifrost & Helicone variants](gateway-variants.md) |
+| Share governor (calibrated α + EWMA/hysteresis); governor stability | §5, §6 | ⬜ **open** — not in scope yet |
 
 > [!TIP]
 > The two highest-leverage moves are the cheapest: **turn on the neural router you already ship** and **add quality detection** — budgets and error-based fallback structurally cannot catch a confidently-wrong local answer.
