@@ -1,0 +1,53 @@
+# =============================================================================
+# OpenTelemetry Collector — GenAI observability substrate (limitations §7)
+# Receives OTLP spans from the LiteLLM gateway (gen_ai.* semantic conventions),
+# derives metrics from them, and exposes those on :8889 for Prometheus to scrape.
+# Docs: docs/guide/reference/observability.md → OpenTelemetry GenAI spans (§7).
+# =============================================================================
+
+receivers:
+  # LiteLLM's "otel" callback ships spans here (OTEL_EXPORTER=otlp_http,
+  # OTEL_ENDPOINT=http://otel-collector:4318 — see docker-compose.yml).
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  batch: {}
+
+connectors:
+  # Turn GenAI spans into Prometheus-scrapable metrics, tagged by model/provider
+  # using the OTel GenAI semantic-convention attributes.
+  spanmetrics:
+    namespace: gen_ai
+    dimensions:
+      - name: gen_ai.request.model
+      # Provider attribute name is version-dependent: older LiteLLM / GenAI semconv
+      # emits gen_ai.system, newer emits gen_ai.provider.name. Capture BOTH so the
+      # provider label survives whichever your gateway version sends (absent = dropped).
+      - name: gen_ai.system
+      - name: gen_ai.provider.name
+      - name: gen_ai.operation.name
+
+exporters:
+  # Prometheus scrape target (prometheus.yml → job_name: otel-collector).
+  prometheus:
+    endpoint: 0.0.0.0:8889
+  # Span visibility in the collector logs; swap for an OTLP/Jaeger/Tempo
+  # exporter when you add a tracing backend.
+  debug:
+    verbosity: normal
+
+service:
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [spanmetrics, debug]
+    metrics:
+      receivers: [spanmetrics]
+      processors: [batch]
+      exporters: [prometheus]

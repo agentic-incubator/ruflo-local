@@ -60,6 +60,7 @@ services:
     container_name: litellm
     depends_on:
       - litellm_db
+      - otel-collector
     ports:
       - "4000:4000"
     volumes:
@@ -72,6 +73,11 @@ services:
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
       - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+      # OTel GenAI spans → collector (limitations §7). Callback enabled in litellm-config.yaml.
+      # NOTE: otlp_http uses OTEL_ENDPOINT verbatim, so the /v1/traces path is REQUIRED
+      # (LiteLLM does not auto-append it) — without it the collector 404s every span.
+      - OTEL_EXPORTER=otlp_http
+      - OTEL_ENDPOINT=${OTEL_ENDPOINT:-http://otel-collector:4318/v1/traces}
     command: ["--config", "/app/config.yaml", "--port", "4000"]
     restart: unless-stopped
 
@@ -115,6 +121,20 @@ services:
     restart: unless-stopped
 
   # --- Observability ---------------------------------------------------------
+  # OTel Collector — receives GenAI spans (gen_ai.* conventions) from the gateway
+  # and exposes span-derived metrics on :8889 for Prometheus (limitations §7).
+  # Image tag pinned deliberately (the GenAI conventions are still evolving).
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.116.0
+    container_name: otel-collector
+    volumes:
+      - ./otel-collector-config.yaml:/etc/otelcol-contrib/config.yaml:ro
+    ports:
+      - "4317:4317"   # OTLP gRPC
+      - "4318:4318"   # OTLP HTTP (gateway posts here)
+      - "8889:8889"   # Prometheus exporter (scraped by prometheus)
+    restart: unless-stopped
+
   prometheus:
     image: prom/prometheus:latest
     container_name: prometheus

@@ -27,6 +27,29 @@ Prometheus scrapes the gateway's `/metrics`. Useful queries to build Grafana pan
 
 ---
 
+## 🔭 OpenTelemetry GenAI spans (§7)
+
+> **Status: shipped.** The gateway's `otel` callback emits **OpenTelemetry GenAI** spans to a bundled **OTel Collector** (`docker compose up -d` starts it), which derives Prometheus metrics on `:8889` (scrape job `otel-collector`). This is the observability substrate the routing/quality/budget mitigations depend on — see [Limitations & Mitigations §7](limitations-and-mitigations.md#-7-observability-the-mitigations-depend-on).
+
+Adopting the [OTel GenAI semantic conventions](https://opentelemetry.io/docs/specs/semconv/registry/attributes/gen-ai/) means telemetry is consumable by Grafana/Datadog/Jaeger/Tempo **without adapters**. Every gateway call carries:
+
+| Attribute | Meaning |
+|---|---|
+| `gen_ai.usage.input_tokens` / `gen_ai.usage.output_tokens` | Prompt / completion token counts per request |
+| `gen_ai.request.model` | The tier alias / physical model asked for |
+| `gen_ai.system` **or** `gen_ai.provider.name` | Which provider actually served it (anthropic / openai / gemini / local). The attribute name is version-dependent — older LiteLLM/semconv emits `gen_ai.system`, newer `gen_ai.provider.name`; the collector captures both. |
+| `gen_ai.operation.name` | The operation (e.g. `chat`) |
+
+**Wiring** (already in this kit): `litellm-config.yaml` sets `callbacks: ["prometheus", "otel"]`; `docker-compose.yml` points the gateway at the collector via `OTEL_EXPORTER=otlp_http` + `OTEL_ENDPOINT=http://otel-collector:4318/v1/traces` (the `/v1/traces` path is required — LiteLLM sends the endpoint verbatim); the collector's `spanmetrics` connector (namespace `gen_ai`) turns spans into metrics tagged by `gen_ai.request.model` and provider (`gen_ai.system`/`gen_ai.provider.name`). Config: [`otel-collector-config.yaml`](../../../otel-collector-config.yaml).
+
+> [!WARNING]
+> **Pin your versions.** The OTel GenAI attributes are still marked **Development** in the semantic-convention registry — the collector image is pinned (`otel/opentelemetry-collector-contrib:0.116.0`) so an upstream rename can't silently break your dashboards. Bump it deliberately, not via `:latest`.
+
+> [!NOTE]
+> Spans carry token counts, model, and provider — **never prompt/response bodies** (`turn_off_message_logging: true` drives LiteLLM's redaction across callbacks incl. OTel, and the shipped `debug` exporter at `verbosity: normal` prints counts, not attributes). Two things re-open that if you change them: raising the collector to `verbosity: detailed` prints content attributes into collector logs, and swapping `debug` for an OTLP/Jaeger/Tempo backend ships whatever the gateway attaches — **re-verify redaction on your LiteLLM version before either.**
+
+---
+
 ## 🗓️ Weekly 10-minute review
 
 - **Frontier share vs target** → adjust threshold / budgets.

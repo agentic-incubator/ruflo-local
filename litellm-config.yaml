@@ -102,10 +102,15 @@ litellm_settings:
     - tier-fast: ["tier-heavy", "tier-frontier"]
   num_retries: 2
   request_timeout: 120
-  # Metrics + spend tracking (Prometheus is open-source since LiteLLM v1.80.0)
-  callbacks: ["prometheus"]
+  # Metrics + spend tracking (Prometheus is open-source since LiteLLM v1.80.0).
+  # "otel" emits OpenTelemetry GenAI spans (gen_ai.* conventions) to the collector
+  # (OTEL_EXPORTER/OTEL_ENDPOINT set in docker-compose.yml) — limitations §7.
+  callbacks: ["prometheus", "otel"]
   track_cost_callback: true
-  # Privacy: keep prompt/response bodies out of logs (metadata still logged)
+  # Emit remaining-budget gauges even for idle keys (needed by the §4 budget work).
+  # Requires a recent LiteLLM; silently ignored on images that predate the key.
+  prometheus_initialize_budget_metrics: true
+  # Privacy: keep prompt/response bodies out of logs (metadata/spans still emitted)
   turn_off_message_logging: true
 
 router_settings:
