@@ -7,3 +7,22 @@ scrape_configs:
     metrics_path: /metrics
     static_configs:
       - targets: ["litellm:4000"]
+
+  # OTel Collector — GenAI span-derived metrics (gen_ai.* conventions, §7)
+  - job_name: otel-collector
+    static_configs:
+      - targets: ["otel-collector:8889"]
+
+  # Bifrost gateway variant (COMPOSE_PROFILES=bifrost) — native Prometheus metrics.
+  # Down when litellm/helicone is the active gateway; harmless. Verify path/port
+  # against your Bifrost release (docs/guide/reference/gateway-variants.md).
+  - job_name: bifrost
+    static_configs:
+      - targets: ["bifrost:8080"]
+
+  # Helicone gateway variant (COMPOSE_PROFILES=helicone) — native Prometheus metrics.
+  # Down when litellm/bifrost is the active gateway; harmless. Verify path/port
+  # against your Helicone release (docs/guide/reference/gateway-variants.md).
+  - job_name: helicone
+    static_configs:
+      - targets: ["helicone:8080"]

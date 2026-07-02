@@ -1,0 +1,15 @@
+{"id": "code-fix-01", "task_class": "bugfix", "prompt": "This Python returns None for empty input instead of 0: def total(xs): return sum(xs) or None. Fix it and explain the bug in one sentence."}
+{"id": "code-explain-01", "task_class": "explain", "prompt": "Explain what a mutex protects against, with a two-line concurrency example."}
+{"id": "code-refactor-01", "task_class": "refactor", "prompt": "Refactor this to remove duplication: if a: log('x'); do(a) elif b: log('x'); do(b) elif c: log('x'); do(c)."}
+{"id": "reasoning-proof-01", "task_class": "reasoning", "prompt": "Prove that the sum of the first n odd numbers equals n^2. Keep it under 80 words."}
+{"id": "instruction-follow-01", "task_class": "format", "prompt": "Reply with EXACTLY three words, all uppercase, describing a hash map's average lookup cost."}
+{"id": "sql-01", "task_class": "sql", "prompt": "Write a SQL query for the second-highest salary from an employees(salary) table, handling ties and the no-second-value case."}
+{"id": "regex-01", "task_class": "regex", "prompt": "Write a regex matching an ISO-8601 date (YYYY-MM-DD) and explain each group briefly."}
+{"id": "toolcall-plan-01", "task_class": "agentic", "prompt": "You have tools: read_file(path), write_file(path, content), run_tests(). Outline the tool call sequence to fix a failing test in src/util.py without running anything yet."}
+{"id": "edgecase-01", "task_class": "edgecase", "prompt": "What edge cases should a function parsing a US phone number handle? List five, no prose."}
+{"id": "algo-01", "task_class": "algorithm", "prompt": "Give the time and space complexity of binary search and one sentence on why."}
+{"id": "debug-trace-01", "task_class": "debug", "prompt": "A stack trace shows RecursionError in a function that flattens nested lists. Name the most likely root cause and the one-line guard that fixes it."}
+{"id": "api-design-01", "task_class": "design", "prompt": "Design a REST endpoint to cancel an order idempotently. Give method, path, status codes, and the idempotency mechanism in under 60 words."}
+{"id": "security-01", "task_class": "security", "prompt": "Why is string-concatenating user input into a shell command dangerous, and what is the correct alternative in Python?"}
+{"id": "translate-01", "task_class": "transform", "prompt": "Convert this to a typed TypeScript signature: a function add that takes two numbers and returns their sum."}
+{"id": "longcontext-01", "task_class": "summarize", "prompt": "Summarize the trade-off of Q4 vs Q6 GGUF quantization for local LLM serving in exactly two bullet points."}

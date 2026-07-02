@@ -4,6 +4,8 @@
 > **Goal:** understand what this is, decide whether it's for you, and get it running with careful copy-paste (or hand it to a technical helper).
 > **Time:** 📖 ~10 min to read · ☕ ~15 min to set up.
 
+> **What you'll need first:** just a couple of free tools (Docker + Ollama). The [Prerequisites](reference/prerequisites.md) page lists them with plain steps — you only need the **"Required — everyone"** section; skip the optional parts unless a helper suggests them.
+
 ---
 
 ## 💡 What is this, really?

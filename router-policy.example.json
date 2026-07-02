@@ -1,0 +1,51 @@
+{
+  "_meta": {
+    "purpose": "Additive router-strengthening policy for the guided router (limitations §1 signal + §2 tool-calling escalation). This file does NOT replace ruflo-tiers.json (that stays schema v1 and is consumed as the per-tier alts map); it is a human-facing REFERENCE POLICY you translate into ruflo env/config so the router scores DIFFICULTY, not length, and treats agentic tool-calling as a hard escalation independent of prompt length. See docs/guide/reference/tiers-and-routing.md (§1/§2) and docs/guide/reference/limitations-and-mitigations.md.",
+    "schema_version": 1,
+    "note": "Values are starting points — re-tune against your own Prometheus actuals (docs/guide/reference/observability.md). Tier names are the gateway aliases (tier-fast/tier-heavy/tier-frontier/tier-private)."
+  },
+
+  "signal": {
+    "comment": "§1 — length ≠ difficulty. Turn on the shipped neural router instead of the lexical path, and feed it features that correlate with difficulty rather than token count.",
+    "neural_router": {
+      "enable": "CLAUDE_FLOW_ROUTER_NEURAL=1",
+      "blend_weight_env": "CLAUDE_FLOW_ROUTER_NEURAL_WEIGHT",
+      "knn_k_env": "CLAUDE_FLOW_ROUTER_KNN_K",
+      "quality_bar_env": "CLAUDE_FLOW_ROUTER_QUALITY_BAR",
+      "cost_ceiling_env": "CLAUDE_FLOW_ROUTER_COST_CEILING_USD_PER_MTOK",
+      "semantic_route_cache_env": "CLAUDE_FLOW_ROUTER_EMBED_CACHE_SIZE",
+      "semantic_route_cache_note": "Reuses ruvector-router-core HNSW so near-duplicate prompts skip re-scoring (§1)."
+    },
+    "non_length_features": [
+      "contains_stack_trace",
+      "multi_file_scope",
+      "cross_file_refactor",
+      "verb_prove_or_derive",
+      "verb_design_or_architect",
+      "verb_refactor_across_files",
+      "requires_tool_calls",
+      "multi_turn_orchestration"
+    ]
+  },
+
+  "escalation": {
+    "comment": "§2 — small local models are specifically weak at agentic tool-calling / multi-turn orchestration, and those turns are NOT necessarily long, so a length-based router cannot see them. Treat these as HARD escalation signals independent of prompt length, and give tool-driven agent types a per-agent-type tier floor.",
+    "hard_signals": [
+      "agentic_tool_calling",
+      "multi_turn_orchestration",
+      "requires_tool_calls"
+    ],
+    "uncertainty_escalation_env": "CLAUDE_FLOW_ROUTER_ENSEMBLE_UNCERTAINTY_THRESHOLD",
+    "uncertainty_escalation_note": "Neural-router ensemble disagreement above this threshold forces an up-tier — a quality-floor-beats-quota escalation that bypasses cost bias.",
+    "tier_floor_by_agent_type": {
+      "_comment": "The router may score DOWN to a cheaper tier, but never BELOW the floor for that agent type. Tool-driven / multi-turn agents start at tier-heavy or tier-frontier regardless of how short the turn looks.",
+      "default": "tier-fast",
+      "coder": "tier-fast",
+      "reviewer": "tier-heavy",
+      "researcher": "tier-heavy",
+      "tool_user": "tier-heavy",
+      "orchestrator": "tier-heavy",
+      "agentic_multiturn": "tier-frontier"
+    }
+  }
+}

@@ -9,6 +9,8 @@ A self-hosted stack that sends **~90% of your LLM traffic to open-weight models 
 > [!NOTE]
 > This page is the **fast path**. Depth lives in the [reference set](README.md) — each step links to it. Read this to *ship*; read the reference to *tune*.
 
+> **Before you start:** run through [Prerequisites](reference/prerequisites.md) (Docker, Ollama, keys — the Required tier). Then, optionally: **strengthen the guided router** (§1–§4 — neural routing, tool-calling escalation, quality verification, budget-steering → [Limitations & Mitigations](reference/limitations-and-mitigations.md#-strengthening-the-guided-router)) and **swap the gateway** (LiteLLM default · Bifrost · Helicone → [Gateway Variants](reference/gateway-variants.md)).
+
 ---
 
 ## 🧭 The whole idea in one picture

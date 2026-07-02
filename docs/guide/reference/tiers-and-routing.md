@@ -98,6 +98,39 @@ RouteLLM repo: https://github.com/lm-sys/RouteLLM · Paper: https://arxiv.org/ab
 
 ---
 
+## 🧠 Strengthening the routing signal (§1, §2)
+
+> **Status: shipped as enablement config + reference policy** — *not* an automatic behavior change. These are the two highest-leverage, cheapest mitigations from [Limitations & Mitigations](limitations-and-mitigations.md#-strengthening-the-guided-router). This kit ships a reference policy — [`router-policy.example.json`](../../../router-policy.example.json) — you translate into ruflo env/config: enabling the neural router (`CLAUDE_FLOW_ROUTER_NEURAL=1`) is a **real ruflo toggle**, while the per-agent-type **tier floor** is **reference policy** you apply in your own ruflo setup (per-request local-tier *enforcement* is the RFC's proposed tier-schema-v2, not yet upstream). It is **additive**: `ruflo-tiers.json` stays schema v1 and is still consumed unchanged as the per-tier alts map.
+
+### Stronger routing signal — score difficulty, not length (§1)
+A router scoring mostly surface features mis-ranks both ways (a short "prove this invariant" is hard; a long file-paste reformat is trivial). Turn on ruflo's **shipped neural router** (k-NN / KRR / FastGRNN over embeddings) instead of the lexical path, feed it non-length features, and reuse the HNSW **semantic route cache** so near-duplicate prompts skip re-scoring:
+
+```bash
+export CLAUDE_FLOW_ROUTER_NEURAL=1                        # enable the neural router (else lexical/bandit path)
+export CLAUDE_FLOW_ROUTER_NEURAL_WEIGHT=0.7              # blend weight neural↔bandit (tune to taste)
+export CLAUDE_FLOW_ROUTER_KNN_K=16                        # k for the k-NN backend
+export CLAUDE_FLOW_ROUTER_QUALITY_BAR=0.8                # minimum predicted quality before down-tiering
+export CLAUDE_FLOW_ROUTER_COST_CEILING_USD_PER_MTOK=20   # $20 excludes Sonnet+Opus-class; $50 excludes only Opus
+export CLAUDE_FLOW_ROUTER_EMBED_CACHE_SIZE=4096          # HNSW semantic route cache — near-dupes skip re-scoring
+```
+
+The non-length features to weight (stack traces, multi-file scope, `prove`/`design`/`refactor-across-files` verbs) are enumerated under `signal.non_length_features` in `router-policy.example.json`.
+
+> ℹ️ The env **names** above are ruflo's documented neural-router surface; the **values** are illustrative starting points — verify the flags against your ruflo build and re-tune against your own metrics ([Observability](observability.md)). These exports also ship pre-listed in [`.env.example`](../../../.env.example) (its client-side section) — set them there, or `export` them in your shell. They're consumed by ruflo, **not** by docker-compose.
+
+### Tool-calling escalation floor — independent of prompt length (§2)
+Small local models are specifically weak at **agentic tool-calling and multi-turn orchestration**, and those turns aren't necessarily long — so a length-based router is the *least* equipped to catch them. Treat tool-calling / multi-turn as a **hard escalation signal independent of length**, and give tool-driven agent types a **per-agent-type tier floor** (the router may score down to a cheaper tier, but never *below* the floor):
+
+```jsonc
+// router-policy.example.json → escalation.tier_floor_by_agent_type
+{ "default": "tier-fast", "reviewer": "tier-heavy", "orchestrator": "tier-heavy",
+  "tool_user": "tier-heavy", "agentic_multiturn": "tier-frontier" }
+```
+
+Ensemble disagreement above `CLAUDE_FLOW_ROUTER_ENSEMBLE_UNCERTAINTY_THRESHOLD` forces an up-tier too — a *quality-floor-beats-quota* escalation that bypasses cost bias. This is why model selection leans on SWE-bench/agentic scores, not raw code-completion → [Hardware & Models](hardware-and-models.md).
+
+---
+
 ## 🔌 Integrating your tools
 
 ### Ruflo / Claude-Flow

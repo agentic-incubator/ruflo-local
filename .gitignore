@@ -91,3 +91,4 @@ venv/
 .Trashes
 Thumbs.db
 Desktop.ini
+.autopilot/queued/
