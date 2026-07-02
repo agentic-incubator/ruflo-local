@@ -1,6 +1,6 @@
 {
   "_meta": {
-    "purpose": "Bifrost gateway config mirroring this kit's four tier aliases, for the `bifrost` compose profile (COMPOSE_PROFILES=bifrost). Bifrost is the Rust, µs-class, native-OTel alternative to the default LiteLLM gateway — see docs/guide/reference/gateway-variants.md.",
+    "purpose": "Bifrost gateway config mirroring this kit's four tier aliases, for the `bifrost` compose profile (COMPOSE_PROFILES=bifrost). Bifrost is the Go, µs-class, native-OTel alternative to the default LiteLLM gateway — see docs/guide/reference/gateway-variants.md.",
     "note": "EXPERIMENTAL TEMPLATE — Bifrost's config schema evolves; verify these keys against the pinned image (maximhq/bifrost:v1.5.2) before relying on it. What MUST hold regardless of schema: the four aliases exist, tier-private has an EMPTY fallback list (the privacy pin — it can never leave the box), and tier-frontier carries the daily budget.",
     "schema_version": 1
   },

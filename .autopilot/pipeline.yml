@@ -123,7 +123,7 @@ phases:
 
   # ── Gateway-selector framework + Bifrost variant ─────────────────────────────
   - id: 5
-    goal: "Make the gateway pluggable and mutually exclusive — exactly ONE of litellm (default) / bifrost / helicone runs at a time on the :4000 seam — and land the first alternative, Bifrost (Rust/Go, native OTel), mirroring the same tiers/budgets with a benchmark and dedicated docs. No default cutover: plain `docker compose up -d` still runs LiteLLM."
+    goal: "Make the gateway pluggable and mutually exclusive — exactly ONE of litellm (default) / bifrost / helicone runs at a time on the :4000 seam — and land the first alternative, Bifrost (Go, native OTel), mirroring the same tiers/budgets with a benchmark and dedicated docs. No default cutover: plain `docker compose up -d` still runs LiteLLM."
     deliverables:
       - "docker-compose.yml: move the existing litellm service behind a compose `profiles: [litellm]`, add a `bifrost` service behind `profiles: [bifrost]` (version-pinned maximhq/bifrost image + bifrost config file); a single selector (COMPOSE_PROFILES, defaulted to `litellm` in .env.example) chooses the active gateway so only one binds :4000."
       - "Bifrost config mirroring tier-fast/heavy/frontier/private, the frontier budgets, and the tier-private NO-FALLBACK privacy pin exactly as LiteLLM enforces it."

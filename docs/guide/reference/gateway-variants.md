@@ -13,7 +13,7 @@ All three gateways are compose **profiles**; a single `COMPOSE_PROFILES` selecto
 | Gateway | Profile | What it is | Pick it when |
 |---|---|---|---|
 | **LiteLLM** (default) | `litellm` | Python + Postgres; the reference gateway with the richest budget/fallback/config surface | You want the full feature set, the RouteLLM 90/10 dial, per-tool virtual keys |
-| **Bifrost** | `bifrost` | Rust, µs-class overhead, native OTel, no Python/Postgres footprint | You want minimal gateway overhead + native tracing (addresses the LiteLLM Python-proxy [scale ceiling](limitations-and-mitigations.md)) |
+| **Bifrost** | `bifrost` | Go, µs-class overhead, native OTel, no Python/Postgres footprint | You want minimal gateway overhead + native tracing (addresses the LiteLLM Python-proxy [scale ceiling](limitations-and-mitigations.md)) |
 | **Helicone** | `helicone` | Rust, native OTel + rich budgets/caching; addresses via named routers (`/router/<tier>`) | You want Bifrost-class overhead **plus** dollar/token/request budgets and optional response caching |
 
 The shipped `.env` sets `COMPOSE_PROFILES=litellm`, so **`docker compose up -d` still yields LiteLLM** — no change for existing users.
@@ -40,7 +40,7 @@ Shared infra — Ollama, Prometheus, Grafana, the OTel collector — is **not** 
 
 ## ⚡ Bifrost variant
 
-Bifrost (Rust, [maximhq/bifrost](https://github.com/maximhq/bifrost)) is a µs-class, OpenAI-compatible gateway with **native Prometheus + OpenTelemetry**. Config lives in [`bifrost-config.json`](../../../bifrost-config.json), which **mirrors the four tier aliases** so your clients keep calling `tier-fast` / `tier-heavy` / `tier-frontier` / `tier-private` unchanged.
+Bifrost (Go, [maximhq/bifrost](https://github.com/maximhq/bifrost)) is a µs-class, OpenAI-compatible gateway with **native Prometheus + OpenTelemetry**. Config lives in [`bifrost-config.json`](../../../bifrost-config.json), which **mirrors the four tier aliases** so your clients keep calling `tier-fast` / `tier-heavy` / `tier-frontier` / `tier-private` unchanged.
 
 **What carries over vs differs:**
 
@@ -95,7 +95,7 @@ Helicone AI Gateway ([Helicone/ai-gateway](https://github.com/Helicone/ai-gatewa
 
 | | **LiteLLM** (default) | **Bifrost** | **Helicone** |
 |---|---|---|---|
-| Language / footprint | Python + Postgres | Rust, µs-class | Rust, µs-class |
+| Language / footprint | Python + Postgres | Go, µs-class | Rust, µs-class |
 | Client addressing | `model: "tier-fast"` | `model: "tier-fast"` | `/router/tier-fast` |
 | Frontier budgets | ✅ USD per deployment | ◐ `budget` block | ✅ USD + token + request |
 | Response caching | via config | — | ✅ Redis/S3 (opt-in, off here) |

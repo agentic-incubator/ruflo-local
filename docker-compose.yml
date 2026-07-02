@@ -99,7 +99,7 @@ services:
       - litellm_pg:/var/lib/postgresql/data
     restart: unless-stopped
 
-  # --- Alternative gateway: Bifrost (Rust, µs-class overhead, native OTel) ---
+  # --- Alternative gateway: Bifrost (Go, µs-class overhead, native OTel) ---
   # Activate INSTEAD of litellm:  COMPOSE_PROFILES=bifrost docker compose up -d
   # Mutually exclusive with litellm/helicone — all three claim host :4000, and only
   # one profile is active at a time. Preserves the four-tier alias vocabulary and the

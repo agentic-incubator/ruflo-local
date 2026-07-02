@@ -10,7 +10,7 @@
 
 | Tool | When to prefer it over this kit |
 |---|---|
-| **Bifrost** (Rust, open-source, self-hosted) — https://github.com/maximhq/bifrost | You want µs-class gateway overhead, native OTel, and no Python/Postgres footprint — **shipped as an activatable `COMPOSE_PROFILES=bifrost` variant** → [Gateway Variants](gateway-variants.md) |
+| **Bifrost** (Go, open-source, self-hosted) — https://github.com/maximhq/bifrost | You want µs-class gateway overhead, native OTel, and no Python/Postgres footprint — **shipped as an activatable `COMPOSE_PROFILES=bifrost` variant** → [Gateway Variants](gateway-variants.md) |
 | **OpenRouter** (managed) — https://openrouter.ai | You want one key for many *cloud* models with zero ops — but requests transit their SaaS (weaker privacy, no local tier) |
 | **Portkey / TrueFoundry / Kong AI** (managed/enterprise gateways) | Team governance, RBAC, compliance needs beyond homelab scope |
 | **Open WebUI** — https://github.com/open-webui/open-webui | You mainly want a chat UI over Ollama (composes fine *behind* this gateway too) |
