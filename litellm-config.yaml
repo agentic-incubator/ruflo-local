@@ -73,7 +73,7 @@ model_list:
       api_key: os.environ/OPENAI_API_KEY
       max_budget: 2.00
       budget_duration: 1d
-      rpm: 6                      # token-rate burst protection alongside the USD cap
+      rpm: 6                      # (rationale in the tier-3 header comment above)
       tpm: 60000
     model_info:
       tier: frontier
@@ -85,7 +85,7 @@ model_list:
       api_key: os.environ/GEMINI_API_KEY
       max_budget: 2.00
       budget_duration: 1d
-      rpm: 6                      # token-rate burst protection alongside the USD cap
+      rpm: 6                      # (rationale in the tier-3 header comment above)
       tpm: 60000
     model_info:
       tier: frontier

@@ -104,7 +104,7 @@ judge_pass() {
   content="$(curl -fsS "$GW/v1/chat/completions" \
     -H "Authorization: Bearer $KEY" -H "Content-Type: application/json" \
     -d "$body" 2>/dev/null | jq -r '.choices[0].message.content // empty' 2>/dev/null || true)"
-  [ -n "$content" ] || { printf ''; return 0; }
+  [ -n "$content" ] || return 0
   # Accept ONLY a strict JSON score CLAMPED to [0,1]. Out-of-range (e.g. an injected
   # {"score":5}) or non-JSON output yields empty → scored 0.0 upstream (fail-CLOSED).
   # No free-float fallback: a judge echoing the untrusted answer (which may contain a

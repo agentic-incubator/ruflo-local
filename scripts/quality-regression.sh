@@ -76,20 +76,27 @@ score() {
 total=0 ; scored=0 ; skipped=0 ; regressions=0
 while IFS= read -r line; do
   [ -n "$line" ] || continue
+  if [ "$LIMIT" -gt 0 ] && [ "$total" -ge "$LIMIT" ]; then break; fi
   total=$((total + 1))
-  if [ "$LIMIT" -gt 0 ] && [ "$total" -gt "$LIMIT" ]; then total=$((total - 1)); break; fi
 
   prompt="$(printf '%s' "$line" | jq -r '.prompt')"
   id="$(printf '%s' "$line" | jq -r '.id // "?"')"
 
+  # Skip BEFORE scoring when a generation is empty — avoids firing the judge (4 calls)
+  # on a row we'd discard anyway (the degraded path this harness is built to tolerate).
   fast_ans="$(ask "$FAST_MODEL" "$prompt")"
   front_ans="$(ask "$FRONTIER_MODEL" "$prompt")"
+  if [ -z "$fast_ans" ] || [ -z "$front_ans" ]; then
+    skipped=$((skipped + 1))
+    printf 'SKIP  %-20s (unscored — model unavailable)\n' "$id" >&2
+    continue
+  fi
+
   fast_score="$(score "$prompt" "$fast_ans")"
   front_score="$(score "$prompt" "$front_ans")"
-
-  if [ "$fast_score" = "null" ] || [ "$front_score" = "null" ] || [ -z "$fast_ans" ] || [ -z "$front_ans" ]; then
+  if [ "$fast_score" = "null" ] || [ "$front_score" = "null" ]; then
     skipped=$((skipped + 1))
-    printf 'SKIP  %-20s (unscored — judge/model unavailable)\n' "$id" >&2
+    printf 'SKIP  %-20s (unscored — judge unavailable)\n' "$id" >&2
     continue
   fi
   scored=$((scored + 1))
