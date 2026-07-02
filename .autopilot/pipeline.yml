@@ -166,8 +166,26 @@ phases:
     adrs:  []
     ddd:   []
 
-  # ── Docs coherence + honest-list refresh ─────────────────────────────────────
+  # ── RouteLLM Python 3.11 → 3.14 upgrade ──────────────────────────────────────
   - id: 7
+    goal: "Upgrade the RouteLLM sidecar off Python 3.11 (nearing end-of-life) to Python 3.14 — verified by an ACTUAL image build + `import routellm`, falling back to the highest Python that builds cleanly if RouteLLM's ML dependency chain (torch/transformers/numpy) has no cp314 wheels yet. Scope is one line (routellm.Dockerfile) but the risk is the ML wheel chain."
+    deliverables:
+      - "routellm.Dockerfile: `FROM python:3.11-slim` → `python:3.14-slim` (the ONLY Python-version pin in the repo). If `routellm[serve]`'s deps have no cp314 wheels, fall back to the highest that builds (3.13) with a one-line comment recording the fallback + date checked."
+      - "Verify the image actually builds and `import routellm` succeeds on the new Python; update any doc/comment that names the RouteLLM Python version."
+    definition_of_done:
+      - "grep: python:3.1[34]-slim in routellm.Dockerfile  — bumped to 3.14 (or 3.13 fallback, recorded)"
+      - "grep:absent: 3\\.11 in routellm.Dockerfile  — no 3.11 pin left in the Dockerfile"
+      - "cmd: docker build -f routellm.Dockerfile -t routellm-pyupgrade-test .  — builds on the new Python (no || true; must actually pass)"
+      - "cmd: docker run --rm routellm-pyupgrade-test python -c 'import routellm; print(routellm.__name__)'  — RouteLLM imports on the new Python"
+      - "cmd: docker run --rm routellm-pyupgrade-test python --version  — reports the intended 3.14 (or the recorded 3.13 fallback)"
+      - "cmd: ! git grep -qiF 'python:3.11' && ! git grep -qiF 'python3.11'  — no Python 3.11 references remain in any tracked file"
+    conventions: "The build MUST genuinely pass — never mask a failure with `|| true`. If 3.14 wheels are unavailable for torch/transformers/numpy at build time, prefer the highest Python that builds cleanly (3.13) and leave a one-line Dockerfile comment stating the fallback and the date checked. Keep routellm.Dockerfile minimal (it only pip-installs routellm[serve] + EXPOSE 6060)."
+    depends_on: []
+    adrs:  []
+    ddd:   []
+
+  # ── Docs coherence + honest-list refresh ─────────────────────────────────────
+  - id: 8
     goal: "Make the docs whole and honest again AND add a dedicated Prerequisites doc: flip the limitations 'honest list' + priority-order table to reflect what now ships, ensure every mitigation section / gateway variant cross-links cleanly with no stale 'not solved' claims for §1–§4/§7, and ship a single validated 'what you must install & configure' guide both personas link to."
     deliverables:
       - "limitations-and-mitigations.md: 'What this doesn't solve' items and the '🥇 Priority order' table updated to mark §1,§2,§3,§4,§7 as shipped/available (item #7 LiteLLM-ceiling gains a pointer to the bifrost AND helicone variants); §5/§6 clearly still open."
@@ -188,6 +206,6 @@ phases:
       - "grep:absent: TODO|FIXME|TBD in docs/guide/reference/prerequisites.md  — no unfinished placeholders"
       - "cmd: grep -l prerequisites docs/guide/getting-started-technical.md docs/guide/getting-started-nontechnical.md  — BOTH personas link the prereqs doc"
     conventions: "Mostly docs/coherence — no behavioral code changes. Preserve the house doc voice (emoji headings, '← Back' nav, callout blocks). Keep the honest-list honest: only mark a mitigation shipped if its phase actually landed it in-repo. For prerequisites.md: VALIDATE every external install link is live during this phase's adversarial review (WebFetch each URL; replace any dead/redirected link) — the gate greps for well-formed https links, but link-reachability is checked in review, not left to the reader. Mark each tool REQUIRED vs OPTIONAL and name the § / feature that needs it."
-    depends_on: [1, 2, 3, 4, 5, 6]
+    depends_on: [1, 2, 3, 4, 5, 6, 7]
     adrs:  []
     ddd:   []
