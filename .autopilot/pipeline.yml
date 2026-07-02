@@ -178,7 +178,7 @@ phases:
       - "cmd: docker build -f routellm.Dockerfile -t routellm-pyupgrade-test .  — builds on the new Python (no || true; must actually pass)"
       - "cmd: docker run --rm routellm-pyupgrade-test python -c 'import routellm; print(routellm.__name__)'  — RouteLLM imports on the new Python"
       - "cmd: docker run --rm routellm-pyupgrade-test python --version  — reports the intended 3.14 (or the recorded 3.13 fallback)"
-      - "cmd: ! git grep -qiF 'python:3.11' && ! git grep -qiF 'python3.11'  — no Python 3.11 references remain in any tracked file"
+      - "cmd: ! git grep -qiF 'python:3.11' -- ':!.autopilot' && ! git grep -qiF 'python3.11' -- ':!.autopilot'  — no Python 3.11 refs in the kit's source/config/docs (the .autopilot plan itself legitimately names the old version to describe the migration, so it's excluded)"
     conventions: "The build MUST genuinely pass — never mask a failure with `|| true`. If 3.14 wheels are unavailable for torch/transformers/numpy at build time, prefer the highest Python that builds cleanly (3.13) and leave a one-line Dockerfile comment stating the fallback and the date checked. Keep routellm.Dockerfile minimal (it only pip-installs routellm[serve] + EXPOSE 6060)."
     depends_on: []
     adrs:  []
