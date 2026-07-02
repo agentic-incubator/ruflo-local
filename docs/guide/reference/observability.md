@@ -71,7 +71,17 @@ Temporarily set one frontier deployment's `max_budget: 0.000001`, restart, call 
 
 ### Quality-regression harness
 > [!TIP]
-> **Recommended after any model swap.** Keep 15–30 prompts representative of *your* work in a file; run them through `tier-fast` and `tier-frontier` and eyeball or LLM-judge the diff. (Ruflo users: the repo's `cost-benchmark` / `cost-counterfactual` skills do this with real math — see [Evidence Appendix](evidence-appendix.md).)
+> **Recommended after any model swap.** This kit ships the harness (limitations §3):
+> ```bash
+> ./scripts/quality-regression.sh              # runs tests/quality-prompts.jsonl through
+>                                              # tier-fast vs tier-frontier; non-zero exit on regression
+> ```
+> It scores each answer with [`scripts/verify-escalate.sh`](../../../scripts/verify-escalate.sh) — a **rubric-anchored, position-swap-averaged** judge — and flags a prompt when `tier-fast` scores materially below `tier-frontier` (`REGRESSION_MARGIN`), failing CI when the regressed fraction exceeds `REGRESSION_THRESHOLD`. Add your own representative prompts to [`tests/quality-prompts.jsonl`](../../../tests/quality-prompts.jsonl). (Ruflo users: the repo's `cost-benchmark` / `cost-counterfactual` skills do this with real math — see [Evidence Appendix](evidence-appendix.md).)
+
+**Verify-then-escalate (in-band, §3).** [`scripts/verify-escalate.sh`](../../../scripts/verify-escalate.sh) scores a single `tier-fast` answer and returns `accept` / `escalate` — the FrugalGPT cascade the *error*-based fallback ladder can't provide (it catches a **confidently-wrong** local answer). The judge is treated as **noisy**: position-swap averaged, rubric-anchored, and **fail-closed** (an unparseable score escalates).
+
+> [!WARNING]
+> The judge reads UNTRUSTED model output. Both scripts pass that content as **data** — jq-encoded (safe transport), **nonce-fenced** (the answer can't forge its own closing delimiter to smuggle instructions), and the parsed score is **clamped to `[0,1]` and fail-closed** (out-of-range or non-JSON ⇒ escalate). Still, an LLM-as-judge is [systematically biased](https://arxiv.org/html/2410.02736v1); treat its scores as a signal, not ground truth, and keep a human in the loop for high-stakes swaps.
 
 ### Load sanity (if sharing the box)
 Fire 8–16 concurrent `tier-fast` requests; if latency collapses, that's Ollama's sequential nature — consider the vLLM profile.
