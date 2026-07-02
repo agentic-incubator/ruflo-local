@@ -54,10 +54,15 @@ services:
               capabilities: [gpu]
     restart: unless-stopped
 
-  # --- The gateway: routing, fallbacks, budgets, metrics --------------------
+  # --- The gateway (DEFAULT): routing, fallbacks, budgets, metrics ----------
+  # One of three MUTUALLY-EXCLUSIVE gateways, selected by COMPOSE_PROFILES
+  # (litellm | bifrost | helicone). litellm is the default — the shipped .env sets
+  # COMPOSE_PROFILES=litellm so `docker compose up -d` still yields LiteLLM.
+  # See docs/guide/reference/gateway-variants.md.
   litellm:
     image: ghcr.io/berriai/litellm:main-stable
     container_name: litellm
+    profiles: ["litellm"]
     depends_on:
       - litellm_db
       - otel-collector
@@ -81,15 +86,42 @@ services:
     command: ["--config", "/app/config.yaml", "--port", "4000"]
     restart: unless-stopped
 
+  # Postgres rides the litellm profile — only LiteLLM needs it for keys/budgets.
   litellm_db:
     image: postgres:16-alpine
     container_name: litellm_db
+    profiles: ["litellm"]
     environment:
       - POSTGRES_USER=litellm
       - POSTGRES_PASSWORD=litellm
       - POSTGRES_DB=litellm
     volumes:
       - litellm_pg:/var/lib/postgresql/data
+    restart: unless-stopped
+
+  # --- Alternative gateway: Bifrost (Rust, µs-class overhead, native OTel) ---
+  # Activate INSTEAD of litellm:  COMPOSE_PROFILES=bifrost docker compose up -d
+  # Mutually exclusive with litellm/helicone — all three claim host :4000, and only
+  # one profile is active at a time. Preserves the four-tier alias vocabulary and the
+  # tier-private no-fallback privacy pin (see bifrost-config.json). Bifrost listens on
+  # :8080 internally; we map it to the same :4000 seam so clients don't change.
+  # EXPERIMENTAL: verify the image tag + config schema against your Bifrost release.
+  bifrost:
+    image: maximhq/bifrost:v1.5.2
+    container_name: bifrost
+    profiles: ["bifrost"]
+    depends_on:
+      - otel-collector
+    ports:
+      - "4000:8080"
+    volumes:
+      - ./bifrost-config.json:/app/data/config.json:ro
+    environment:
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+      - OLLAMA_API_BASE=${OLLAMA_API_BASE:-http://ollama:11434}
+    command: ["-app-dir", "/app/data"]
     restart: unless-stopped
 
   # --- Optional: learned 90/10 router (RouteLLM, lm-sys) --------------------

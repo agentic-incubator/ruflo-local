@@ -12,3 +12,10 @@ scrape_configs:
   - job_name: otel-collector
     static_configs:
       - targets: ["otel-collector:8889"]
+
+  # Bifrost gateway variant (COMPOSE_PROFILES=bifrost) — native Prometheus metrics.
+  # Down when litellm/helicone is the active gateway; harmless. Verify path/port
+  # against your Bifrost release (docs/guide/reference/gateway-variants.md).
+  - job_name: bifrost
+    static_configs:
+      - targets: ["bifrost:8080"]

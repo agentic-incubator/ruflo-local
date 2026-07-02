@@ -22,6 +22,7 @@ Slim topic pages the two guides link into. Read them in any order.
 | 🧭 **[Tiers & Routing](reference/tiers-and-routing.md)** | The four tiers, the fall-through ladder, where the 90/10 split comes from, integrating your tools |
 | 💵 **[Budgets & Trade-offs](reference/budgets-and-tradeoffs.md)** | The trade-off matrix, config anatomy, tuning recipes, per-tool spending caps |
 | 📊 **[Observability & Testing](reference/observability.md)** | What to watch, PromQL panels, the weekly review, smoke tests + validation drills |
+| 🔀 **[Gateway Variants](reference/gateway-variants.md)** | The pluggable gateway selector — litellm (default) / bifrost / helicone, one at a time, how to switch |
 | ⚠️ **[Limitations & Mitigations](reference/limitations-and-mitigations.md)** | Honest list of what this doesn't solve — each guided-router weakness with a cited fix + priority order |
 | 🔗 **[Resources & Alternatives](reference/resources.md)** | When to prefer another tool; all external links, papers, standards, leaderboards |
 
