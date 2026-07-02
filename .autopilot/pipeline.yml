@@ -44,13 +44,14 @@ phases:
     goal: "Route on difficulty, not length: enable the shipped neural router and make agentic/multi-turn tool-calling a hard escalation signal independent of prompt length — additively, without breaking ruflo-tiers.json's v1 schema."
     deliverables:
       - "New companion policy file (e.g. router-policy.example.json) expressing non-length features (stack-trace / multi-file / 'prove|design|refactor-across-files') and a per-agent-type tier floor so tool-driven turns start at tier-heavy or frontier."
-      - "docs/guide/reference/tiers-and-routing.md 'Integrating your tools → Ruflo' block: CLAUDE_FLOW_ROUTER_NEURAL=1 plus the related neural-router env (NEURAL_WEIGHT, EMBED_CACHE_SIZE = the semantic route-cache knob, ENSEMBLE_UNCERTAINTY_THRESHOLD, KNN_K, QUALITY_BAR, COST_CEILING_USD_PER_MTOK) documented as ruflo shell exports. NOTE: .env.example is docker-compose/gateway-only in this kit — ruflo client env is exported in the shell, not put there."
+      - ".env.example: the CLAUDE_FLOW_ROUTER_* neural-router env (§1/§2 — NEURAL, NEURAL_WEIGHT, KNN_K, QUALITY_BAR, COST_CEILING_USD_PER_MTOK, EMBED_CACHE_SIZE = semantic route-cache, ENSEMBLE_UNCERTAINTY_THRESHOLD) in a clearly-labelled CLIENT-SIDE section (consumed by ruflo in-shell, not docker-compose). docs/guide/reference/tiers-and-routing.md §1/§2 explains them and cross-references .env.example."
       - "docs/guide/reference/tiers-and-routing.md: a 'Stronger routing signal (§1)' subsection (neural router activation + non-length features + HNSW semantic route-cache note) and a 'Tool-calling escalation floor (§2)' subsection."
       - "limitations-and-mitigations.md: §1 and §2 mitigation blocks annotated as APPLIED with a pointer to the new config/docs."
     definition_of_done:
       - "cmd: jq -e . ruflo-tiers.json >/dev/null  — existing alts file still valid JSON"
       - "cmd: jq -e '._meta.schema_version == 1' ruflo-tiers.json  — v1 schema preserved (no upstream-only v2 break)"
-      - "grep: CLAUDE_FLOW_ROUTER_NEURAL in docs/guide/reference/tiers-and-routing.md  — neural-router env documented as ruflo shell exports (.env.example is docker-only)"
+      - "cmd: git grep -q CLAUDE_FLOW_ROUTER_NEURAL -- .env.example  — router env present in .env.example client-side section (git grep: direct reads are permission-blocked)"
+      - "grep: CLAUDE_FLOW_ROUTER_NEURAL in docs/guide/reference/tiers-and-routing.md  — documented + cross-referenced to .env.example"
       - "grep: tier_floor|tier-floor|escalation in the new router-policy example file"
       - "cmd: jq -e . router-policy.example.json >/dev/null  — new policy file is valid JSON"
       - "grep: Tool-calling escalation in docs/guide/reference/tiers-and-routing.md"

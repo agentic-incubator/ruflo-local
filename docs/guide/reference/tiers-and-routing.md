@@ -116,7 +116,7 @@ export CLAUDE_FLOW_ROUTER_EMBED_CACHE_SIZE=4096          # HNSW semantic route c
 
 The non-length features to weight (stack traces, multi-file scope, `prove`/`design`/`refactor-across-files` verbs) are enumerated under `signal.non_length_features` in `router-policy.example.json`.
 
-> ℹ️ The env **names** above are ruflo's documented neural-router surface; the **values** are illustrative starting points — verify the flags against your ruflo build and re-tune against your own metrics ([Observability](observability.md)).
+> ℹ️ The env **names** above are ruflo's documented neural-router surface; the **values** are illustrative starting points — verify the flags against your ruflo build and re-tune against your own metrics ([Observability](observability.md)). These exports also ship pre-listed in [`.env.example`](../../../.env.example) (its client-side section) — set them there, or `export` them in your shell. They're consumed by ruflo, **not** by docker-compose.
 
 ### Tool-calling escalation floor — independent of prompt length (§2)
 Small local models are specifically weak at **agentic tool-calling and multi-turn orchestration**, and those turns aren't necessarily long — so a length-based router is the *least* equipped to catch them. Treat tool-calling / multi-turn as a **hard escalation signal independent of length**, and give tool-driven agent types a **per-agent-type tier floor** (the router may score down to a cheaper tier, but never *below* the floor):
