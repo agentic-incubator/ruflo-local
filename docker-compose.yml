@@ -1,0 +1,146 @@
+# =============================================================================
+# Local-First Tiered LLM Routing Kit
+# Services: Ollama (local inference) + LiteLLM (gateway/budgets/fallbacks)
+#           + Postgres (keys/budgets) + Prometheus + Grafana (observability)
+# Optional profiles:
+#   --profile gpu     → adds vLLM for high-throughput local serving (NVIDIA)
+#   --profile router  → adds RouteLLM (learned 90/10 strong/weak router)
+# See docs/guide/ for full instructions (start: getting-started-technical.md).
+# =============================================================================
+
+services:
+
+  # --- Tier 1/2: local inference -------------------------------------------
+  # NOTE (macOS/Windows): Docker cannot access Apple/consumer GPUs. Run Ollama
+  # natively on the host instead, set OLLAMA_API_BASE=http://host.docker.internal:11434
+  # in .env, and start with:  docker compose up --scale ollama=0
+  ollama:
+    image: ollama/ollama:latest
+    container_name: ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_models:/root/.ollama
+    restart: unless-stopped
+    # Uncomment for NVIDIA GPUs (requires nvidia-container-toolkit):
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: all
+    #           capabilities: [gpu]
+
+  # --- Optional Tier-2 alternative: vLLM (NVIDIA GPU, high concurrency) -----
+  vllm:
+    image: vllm/vllm-openai:latest
+    container_name: vllm
+    profiles: ["gpu"]
+    ports:
+      - "8000:8000"
+    environment:
+      - HUGGING_FACE_HUB_TOKEN=${HF_TOKEN:-}
+    command: >
+      --model ${VLLM_MODEL:-Qwen/Qwen3.6-27B}
+      --max-model-len ${VLLM_MAX_LEN:-16384}
+    volumes:
+      - hf_cache:/root/.cache/huggingface
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    restart: unless-stopped
+
+  # --- The gateway: routing, fallbacks, budgets, metrics --------------------
+  litellm:
+    image: ghcr.io/berriai/litellm:main-stable
+    container_name: litellm
+    depends_on:
+      - litellm_db
+    ports:
+      - "4000:4000"
+    volumes:
+      - ./litellm-config.yaml:/app/config.yaml:ro
+    environment:
+      - LITELLM_MASTER_KEY=${LITELLM_MASTER_KEY:-sk-local-master}
+      - DATABASE_URL=postgresql://litellm:litellm@litellm_db:5432/litellm
+      - OLLAMA_API_BASE=${OLLAMA_API_BASE:-http://ollama:11434}
+      - VLLM_API_BASE=${VLLM_API_BASE:-http://vllm:8000/v1}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+    command: ["--config", "/app/config.yaml", "--port", "4000"]
+    restart: unless-stopped
+
+  litellm_db:
+    image: postgres:16-alpine
+    container_name: litellm_db
+    environment:
+      - POSTGRES_USER=litellm
+      - POSTGRES_PASSWORD=litellm
+      - POSTGRES_DB=litellm
+    volumes:
+      - litellm_pg:/var/lib/postgresql/data
+    restart: unless-stopped
+
+  # --- Optional: learned 90/10 router (RouteLLM, lm-sys) --------------------
+  # Exposes an OpenAI-compatible endpoint that decides strong-vs-weak per
+  # request. Point it AT LiteLLM so budgets/metrics still apply downstream.
+  # CAVEAT: the default 'mf' router calls OpenAI for embeddings (privacy
+  # trade-off) — see docs/guide/reference/tiers-and-routing.md (RouteLLM 90/10 dial)
+  # and docs/guide/reference/limitations-and-mitigations.md.
+  routellm:
+    build:
+      context: .
+      dockerfile: routellm.Dockerfile
+    container_name: routellm
+    profiles: ["router"]
+    depends_on:
+      - litellm
+    ports:
+      - "6060:6060"
+    environment:
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}   # required for mf-router embeddings
+    command: >
+      python -m routellm.openai_server
+      --routers mf
+      --strong-model openai/tier-frontier
+      --weak-model  openai/tier-fast
+      --base-url http://litellm:4000/v1
+      --api-key ${LITELLM_MASTER_KEY:-sk-local-master}
+      --port 6060
+    restart: unless-stopped
+
+  # --- Observability ---------------------------------------------------------
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prom_data:/prometheus
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: grafana
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:-admin}
+      - GF_AUTH_ANONYMOUS_ENABLED=false
+    volumes:
+      - ./grafana-datasources.yml:/etc/grafana/provisioning/datasources/datasources.yml:ro
+      - grafana_data:/var/lib/grafana
+    restart: unless-stopped
+
+volumes:
+  ollama_models:
+  hf_cache:
+  litellm_pg:
+  prom_data:
+  grafana_data:

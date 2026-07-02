@@ -1,0 +1,93 @@
+# ==============================================================================
+# .gitignore — ruflo-local (local LLM routing kit: Docker + LiteLLM + observability)
+# ==============================================================================
+# Goal: keep the repo reproducible for others while excluding local tool state,
+# secrets, and generated/OS noise. Tracked config (docker-compose.yml,
+# litellm-config.yaml, prometheus.yml, grafana-datasources.yml, *.Dockerfile,
+# *.sh, ruflo-tiers.json) is intentionally NOT ignored.
+# ==============================================================================
+
+# ------------------------------------------------------------------------------
+# Local AI tooling state (Claude Code / ruflo / agentic-qe / swarm)
+# Not needed by others to run this repo; regenerated per-machine.
+# ------------------------------------------------------------------------------
+.claude/
+.claude-flow/
+.swarm/
+.agentic-qe/
+.mcp.json
+ruvector.db
+*.db-journal
+*.db-wal
+*.db-shm
+
+# ------------------------------------------------------------------------------
+# Secrets & credentials  (NEVER commit real secrets)
+# Keep the committed template: .env.example
+# ------------------------------------------------------------------------------
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+secrets/
+credentials.json
+
+# ------------------------------------------------------------------------------
+# Runtime data & container volumes
+# Local Docker volume mounts (prometheus/grafana/litellm data, logs, caches).
+# ------------------------------------------------------------------------------
+data/
+volumes/
+logs/
+*.log
+prometheus-data/
+grafana-data/
+grafana-storage/
+
+# ------------------------------------------------------------------------------
+# Build artifacts & archives
+# ------------------------------------------------------------------------------
+*.zip
+*.tar
+*.tar.gz
+*.tgz
+dist/
+build/
+tmp/
+.tmp/
+
+# ------------------------------------------------------------------------------
+# Node / Python tooling (present via CLIs; ignore if any local installs appear)
+# ------------------------------------------------------------------------------
+node_modules/
+.npm/
+.pnp.*
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.mypy_cache/
+.pytest_cache/
+
+# ------------------------------------------------------------------------------
+# Editor / IDE
+# ------------------------------------------------------------------------------
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# ------------------------------------------------------------------------------
+# OS cruft
+# ------------------------------------------------------------------------------
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+Thumbs.db
+Desktop.ini

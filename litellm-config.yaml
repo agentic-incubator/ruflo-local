@@ -1,0 +1,119 @@
+# =============================================================================
+# LiteLLM gateway config — tiered, local-first routing with budgets + metrics
+# Tiers are MODEL ALIASES. Clients only ever ask for tier-fast / tier-heavy /
+# tier-frontier; this file decides what actually serves them.
+# Docs: https://docs.litellm.ai/docs/proxy/config_settings
+# =============================================================================
+
+model_list:
+
+  # ---- TIER 1: local-fast (default workhorse, ~90% of traffic) -------------
+  - model_name: tier-fast
+    litellm_params:
+      model: ollama_chat/qwen3-coder:30b-a3b     # MoE ~3B active; swap to qwen3.6:35b-a3b for a stronger tier-fast (see docs/guide/reference/hardware-and-models.md)
+      api_base: os.environ/OLLAMA_API_BASE
+    model_info:
+      tier: local-fast
+      locality: local
+
+  # Pilot candidate — Ornith-1.0-35B MoE (~3B active, MIT; DeepReinforce, see docs/guide/reference/hardware-and-models.md).
+  # Agentic/tool-use-tuned "self-scaffolding" coder; vendor SWE-bench Verified 75.6 (unconfirmed).
+  # To A/B against the default: either swap the `model:` line above, OR uncomment this as a
+  # SECOND tier-fast deployment (same alias ⇒ LiteLLM load-balances/fails over between the two).
+  # Ollama serves the HF GGUF directly (no separate registry tag needed):
+  #   ollama pull hf.co/deepreinforce-ai/Ornith-1.0-35B-GGUF
+  # - model_name: tier-fast
+  #   litellm_params:
+  #     model: ollama_chat/hf.co/deepreinforce-ai/Ornith-1.0-35B-GGUF   # Q4_K_M ~20GB / Q5_K_M ~25GB
+  #     api_base: os.environ/OLLAMA_API_BASE
+  #   model_info: { tier: local-fast, locality: local }
+
+  # ---- TIER 2: local-heavy (bigger local model; via Ollama by default) -----
+  - model_name: tier-heavy
+    litellm_params:
+      model: ollama_chat/qwen3.6:27b             # dense 27B, SWE-bench 77.2% (verify Ollama tag; see docs/guide/reference/hardware-and-models.md)
+      api_base: os.environ/OLLAMA_API_BASE
+    model_info:
+      tier: local-heavy
+      locality: local
+
+  # Optional second deployment of tier-heavy on vLLM (--profile gpu).
+  # Same alias ⇒ LiteLLM load-balances / fails over between the two.
+  # - model_name: tier-heavy
+  #   litellm_params:
+  #     model: openai/Qwen/Qwen3.6-27B         # AWQ build for vLLM
+  #     api_base: os.environ/VLLM_API_BASE
+  #     api_key: "none"
+  #   model_info: { tier: local-heavy, locality: local }
+
+  # ---- TIER 3: frontier (budget-capped; ≤10% of traffic by design) ---------
+  # Multiple deployments under ONE alias ⇒ automatic failover between
+  # Claude → GPT → Gemini if one provider errors or exhausts its budget.
+  - model_name: tier-frontier
+    litellm_params:
+      model: anthropic/claude-opus-4-8
+      api_key: os.environ/ANTHROPIC_API_KEY
+      max_budget: 3.00            # USD — this deployment stops serving when hit
+      budget_duration: 1d         # 1s…1mo; resets each period
+      rpm: 6                      # gentle rate cap for agentic bursts
+      tpm: 60000
+    model_info:
+      tier: frontier
+      locality: cloud
+
+  - model_name: tier-frontier
+    litellm_params:
+      model: openai/gpt-4.1
+      api_key: os.environ/OPENAI_API_KEY
+      max_budget: 2.00
+      budget_duration: 1d
+    model_info:
+      tier: frontier
+      locality: cloud
+
+  - model_name: tier-frontier
+    litellm_params:
+      model: gemini/gemini-2.5-pro
+      api_key: os.environ/GEMINI_API_KEY
+      max_budget: 2.00
+      budget_duration: 1d
+    model_info:
+      tier: frontier
+      locality: cloud
+
+  # ---- Privacy-pinned alias: can NEVER escalate off-box ---------------------
+  # Point sensitive projects here; no fallback chain leaves localhost.
+  - model_name: tier-private
+    litellm_params:
+      model: ollama_chat/qwen3.6:27b             # dense 27B, local-only (verify Ollama tag; see docs/guide/reference/hardware-and-models.md)
+      api_base: os.environ/OLLAMA_API_BASE
+    model_info:
+      tier: private
+      locality: local
+
+litellm_settings:
+  # Fall-through ladder: local-fast → local-heavy → frontier.
+  # tier-private is deliberately ABSENT from every chain.
+  fallbacks:
+    - tier-fast:  ["tier-heavy", "tier-frontier"]
+    - tier-heavy: ["tier-frontier"]
+  # Long prompt overflows a small local context? Up-shift automatically.
+  context_window_fallbacks:
+    - tier-fast: ["tier-heavy", "tier-frontier"]
+  num_retries: 2
+  request_timeout: 120
+  # Metrics + spend tracking (Prometheus is open-source since LiteLLM v1.80.0)
+  callbacks: ["prometheus"]
+  track_cost_callback: true
+  # Privacy: keep prompt/response bodies out of logs (metadata still logged)
+  turn_off_message_logging: true
+
+router_settings:
+  routing_strategy: simple-shuffle
+  enable_pre_call_checks: true     # enables context-window checks pre-dispatch
+  allowed_fails: 3                 # breaker: cooldown a deployment after 3 fails/min
+  cooldown_time: 30
+
+general_settings:
+  master_key: os.environ/LITELLM_MASTER_KEY
+  database_url: os.environ/DATABASE_URL
