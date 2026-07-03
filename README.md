@@ -2,6 +2,8 @@
 
 Send **~90% of your LLM traffic to open-weight models on your own hardware** and reserve **~10%** for frontier APIs (Claude / GPT / Gemini) — with fall-through reliability, hard budget caps, a **privacy-pinned lane that can never leave your machine**, a **pluggable gateway** (LiteLLM · Bifrost · Helicone), and Grafana dashboards for all of it.
 
+![Local-first AI traffic optimization](local-first-ai-traffic-optimization.png)
+
 ## Quick start
 
 ```bash
