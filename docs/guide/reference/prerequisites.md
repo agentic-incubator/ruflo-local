@@ -23,9 +23,17 @@ You need these three for any working install.
 - **Install:** [ollama.com/download](https://ollama.com/download). On macOS/Windows run it **on the host** (Docker can't reach Apple/consumer GPUs) and start the stack with `docker compose up --scale ollama=0`; on Linux the bundled `ollama` container works.
 - **Pull the models** your tiers reference (see [Hardware & Models](hardware-and-models.md)):
   ```bash
-  ollama pull qwen3-coder:30b-a3b     # tier-fast
-  ollama pull qwen3.6:27b             # tier-heavy / tier-private
+  ollama pull qwen3-coder:30b-a3b-q4_K_M   # tier-fast (MoE ~3B active, ~19 GB)
+  ollama pull qwen3.6:27b                   # tier-heavy / tier-private (dense ~17 GB)
   ```
+- **🍎 Apple Silicon (macOS):** prefer the **MLX** builds — same weights, Apple's MLX
+  engine for better throughput. Pull these instead and point the tier's `model:` at them:
+  ```bash
+  ollama pull qwen3.6:27b-mlx               # tier-heavy / tier-private on macOS (~20 GB)
+  # tier-fast: qwen3-coder has NO MLX build yet — keep qwen3-coder:30b-a3b-q4_K_M
+  #            (Ollama still Metal-accelerates the GGUF on Apple Silicon).
+  ```
+  Then set the matching tier in `litellm-config.yaml` (e.g. `ollama_chat/qwen3.6:27b-mlx`).
 - **Verify:**
   ```bash
   ollama --version && ollama list

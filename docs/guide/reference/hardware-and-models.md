@@ -21,9 +21,13 @@ Pick your local ambition by memory. The default `tier-fast` is a Mixture-of-Expe
 > [!NOTE]
 > Tiers are just **aliases** (see [Tiers & Routing](tiers-and-routing.md)), so the model behind each is a one-line change. The defaults matter, but nothing locks you in.
 
+> [!TIP]
+> **Apple Silicon:** run Ollama natively on the host and prefer the **MLX** builds (`qwen3.6:27b-mlx`, `qwen3.6:35b-mlx`) — same weights, Apple's MLX engine for better throughput. `qwen3-coder` has no MLX build yet, so `tier-fast` stays on `qwen3-coder:30b-a3b-q4_K_M`. See the pull commands in [Prerequisites](prerequisites.md#2-ollama-local-inference).
+
 **Where to get models:**
-- 🦙 **Ollama library** (GGUF, one-command pull): https://ollama.com/library — starters: `qwen3-coder:30b-a3b` (`tier-fast`), `qwen3.6:27b` (`tier-heavy`, verify exact tag).
-- 🤗 **Hugging Face** (safetensors, for vLLM): https://huggingface.co/models — e.g. `Qwen/Qwen3.6-27B`, `Qwen/Qwen3.6-35B-A3B`, `Qwen/Qwen3-Coder-30B-A3B-Instruct`.
+- 🦙 **Ollama library** (GGUF, one-command pull): https://ollama.com/library — starters: `qwen3-coder:30b-a3b-q4_K_M` (`tier-fast`; the bare `qwen3-coder:30b` alias is the same build), `qwen3.6:27b` (`tier-heavy`).
+- 🍎 **Apple Silicon (macOS) — MLX builds:** `qwen3.6:27b-mlx` (~20 GB) and `qwen3.6:35b-mlx` (~22 GB) run on Ollama's MLX engine for better throughput on M-series chips. **`qwen3-coder` has no MLX build yet** — `tier-fast` keeps `qwen3-coder:30b-a3b-q4_K_M` (Ollama still Metal-accelerates the GGUF).
+- 🤗 **Hugging Face** (safetensors, for vLLM): https://huggingface.co/models — e.g. `Qwen/Qwen3.6-27B` (or the AWQ build `QuantTrio/Qwen3.6-27B-AWQ`), `Qwen/Qwen3.6-35B-A3B`, `Qwen/Qwen3-Coder-30B-A3B-Instruct`.
 
 ---
 
@@ -37,7 +41,7 @@ Pick your local ambition by memory. The default `tier-fast` is a Mixture-of-Expe
 | Role | Model | Params (active) | License | SWE-bench Verified | Q4 footprint | Fit |
 |---|---|---|---|--:|---|---|
 | **tier-fast (default)** | Qwen3-Coder-30B-A3B | 30.5B MoE (3.3B active) | Apache-2.0 | 51.6% | ~19–22 GB | 32 GB+ RAM / 24 GB GPU; runs at ~3B-dense speed. On Ollama today. |
-| **tier-fast (upgrade)** | Qwen3.6-35B-A3B | 35B MoE (~3B active) | Apache-2.0 | **73.4%** | ~20 GB | Same footprint, far stronger — **pending a turnkey Q4 Ollama build** (HF/vLLM now). |
+| **tier-fast (upgrade)** | Qwen3.6-35B-A3B | 35B MoE (~3B active) | Apache-2.0 | **73.4%** | ~24 GB | Same footprint, far stronger — **now on Ollama** as `qwen3.6:35b-a3b` (or `qwen3.6:35b-mlx` on Apple Silicon). |
 | **tier-heavy (default)** | Qwen3.6-27B (dense) | 27–28B dense | Apache-2.0 | **77.2%** | ~16–17 GB | 24 GB GPU / 64 GB Mac. Beats last-gen's 397B model on coding. |
 | **tier-heavy (fallback)** | Qwen3.5-27B (dense) | 27B dense | Apache-2.0 | 72.4% | ~16–17 GB | Same footprint; use if a 3.6 build misbehaves. |
 

@@ -28,7 +28,7 @@ routers:
       chat:
         strategy: weighted
         models:
-          - ollama-local/qwen3-coder:30b-a3b
+          - ollama-local/qwen3-coder:30b-a3b-q4_K_M   # qwen3-coder has no MLX build; macOS/Apple Silicon uses this same tag
 
   # --- Tier 2: local-heavy ---
   tier-heavy:
@@ -36,7 +36,7 @@ routers:
       chat:
         strategy: weighted
         models:
-          - ollama-local/qwen3.6:27b
+          - ollama-local/qwen3.6:27b   # macOS/Apple Silicon: use ollama-local/qwen3.6:27b-mlx for the MLX engine
 
   # --- Tier 3: frontier (budget-capped; latency-balanced across Claude/GPT/Gemini) ---
   tier-frontier:
@@ -60,7 +60,7 @@ routers:
       chat:
         strategy: weighted
         models:
-          - ollama-local/qwen3.6:27b
+          - ollama-local/qwen3.6:27b   # macOS/Apple Silicon: use ollama-local/qwen3.6:27b-mlx for the MLX engine
 
 # Caching is OPT-IN and left OFF so the standalone variant needs no Redis/S3.
 cache-store:

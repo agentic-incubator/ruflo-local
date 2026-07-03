@@ -186,9 +186,9 @@ A slow controller (EWMA over a rolling window) reads observed frontier share `s(
   "tiers": {
     "codemod":     { "locality": "local",    "provider": "none" },
     "local-fast":  { "locality": "local",    "provider": "openai-compat",
-                     "base_url": "http://localhost:11434/v1", "model": "qwen3-coder:30b-a3b", "max_tokens": 2048 },
+                     "base_url": "http://localhost:11434/v1", "model": "qwen3-coder:30b-a3b-q4_K_M", "max_tokens": 2048 },
     "local-heavy": { "locality": "local",    "provider": "openai-compat",
-                     "base_url": "http://gpubox:8000/v1", "model": "Qwen/Qwen3.6-27B", "max_tokens": 8192 },
+                     "base_url": "http://gpubox:8000/v1", "model": "QuantTrio/Qwen3.6-27B-AWQ", "max_tokens": 8192 },
     "frontier":    { "locality": "frontier", "provider": "anthropic", "model": "claude-opus-4-8", "max_tokens": 16384,
                      "alternates": ["openai/gpt-4.1", "google/gemini-2.5-pro"] }
   },
