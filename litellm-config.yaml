@@ -10,7 +10,7 @@ model_list:
   # ---- TIER 1: local-fast (default workhorse, ~90% of traffic) -------------
   - model_name: tier-fast
     litellm_params:
-      model: ollama_chat/qwen3-coder:30b-a3b     # MoE ~3B active; swap to qwen3.6:35b-a3b for a stronger tier-fast (see docs/guide/reference/hardware-and-models.md)
+      model: ollama_chat/qwen3-coder:30b-a3b-q4_K_M  # MoE ~3B active; swap to qwen3.6:35b-a3b for a stronger tier-fast (see docs/guide/reference/hardware-and-models.md). qwen3-coder has no MLX build, so macOS uses this same tag.
       api_base: os.environ/OLLAMA_API_BASE
     model_info:
       tier: local-fast
@@ -31,7 +31,7 @@ model_list:
   # ---- TIER 2: local-heavy (bigger local model; via Ollama by default) -----
   - model_name: tier-heavy
     litellm_params:
-      model: ollama_chat/qwen3.6:27b             # dense 27B, SWE-bench 77.2% (verify Ollama tag; see docs/guide/reference/hardware-and-models.md)
+      model: ollama_chat/qwen3.6:27b             # dense 27B, SWE-bench 77.2% (see docs/guide/reference/hardware-and-models.md). macOS/Apple Silicon: pull + use qwen3.6:27b-mlx for the MLX engine.
       api_base: os.environ/OLLAMA_API_BASE
     model_info:
       tier: local-heavy
@@ -41,7 +41,7 @@ model_list:
   # Same alias ⇒ LiteLLM load-balances / fails over between the two.
   # - model_name: tier-heavy
   #   litellm_params:
-  #     model: openai/Qwen/Qwen3.6-27B         # AWQ build for vLLM
+  #     model: openai/QuantTrio/Qwen3.6-27B-AWQ   # AWQ build for vLLM (matches VLLM_MODEL in .env.example)
   #     api_base: os.environ/VLLM_API_BASE
   #     api_key: "none"
   #   model_info: { tier: local-heavy, locality: local }
@@ -95,7 +95,7 @@ model_list:
   # Point sensitive projects here; no fallback chain leaves localhost.
   - model_name: tier-private
     litellm_params:
-      model: ollama_chat/qwen3.6:27b             # dense 27B, local-only (verify Ollama tag; see docs/guide/reference/hardware-and-models.md)
+      model: ollama_chat/qwen3.6:27b             # dense 27B, local-only (see docs/guide/reference/hardware-and-models.md). macOS/Apple Silicon: pull + use qwen3.6:27b-mlx for the MLX engine.
       api_base: os.environ/OLLAMA_API_BASE
     model_info:
       tier: private

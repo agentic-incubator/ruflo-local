@@ -83,7 +83,7 @@ No frontier keys at all? The stack still works — you just get a fully-local, z
 
 ### 2.4 Model sources
 
-- Ollama model library (GGUF, one-command pull): https://ollama.com/library — recommended starters (2026): `qwen3-coder:30b-a3b` (tier-fast), `Qwen3.6-27B` (tier-heavy). See §2.4a for why these replace the older `qwen2.5-coder` builds.
+- Ollama model library (GGUF, one-command pull): https://ollama.com/library — recommended starters (2026): `qwen3-coder:30b-a3b-q4_K_M` (tier-fast), `qwen3.6:27b` (tier-heavy). See §2.4a for why these replace the older `qwen2.5-coder` builds.
 - Hugging Face (safetensors, for vLLM): https://huggingface.co/models — e.g. `Qwen/Qwen3.6-27B`, `Qwen/Qwen3.6-35B-A3B`, `Qwen/Qwen3-Coder-30B-A3B-Instruct`
 
 ### 2.4a Which models, and why (open-weight landscape, June–July 2026)
@@ -141,8 +141,8 @@ docker compose up -d
 #    - then:        docker compose up -d --scale ollama=0
 
 # 3. Pull the local models (first pull downloads several GB)
-docker exec ollama ollama pull qwen3-coder:30b-a3b   # tier-fast (MoE, ~3B active, ~19GB) — confirmed on Ollama
-docker exec ollama ollama pull qwen3.6:27b           # tier-heavy (dense, ~16-17GB); verify the exact tag on ollama.com/library — skip on small machines
+docker exec ollama ollama pull qwen3-coder:30b-a3b-q4_K_M   # tier-fast (MoE, ~3B active, ~19GB) — confirmed on Ollama
+docker exec ollama ollama pull qwen3.6:27b                   # tier-heavy (dense, ~17GB) — skip on small machines
 #    (native Ollama: just `ollama pull …` on the host)
 
 # 4. Verify everything
@@ -261,9 +261,9 @@ Full reference: https://docs.litellm.ai/docs/proxy/config_settings · fallbacks:
 
 **Swap the workhorse model** (one line):
 ```yaml
-model: ollama_chat/qwen3.6-35b-a3b     # was qwen3-coder:30b-a3b — stronger MoE, same ~3B-active speed
+model: ollama_chat/qwen3.6:35b-a3b     # was qwen3-coder:30b-a3b-q4_K_M — stronger MoE, same ~3B-active speed
 ```
-then `docker exec ollama ollama pull qwen3.6-35b-a3b && docker compose restart litellm`.
+then `docker exec ollama ollama pull qwen3.6:35b-a3b && docker compose restart litellm`.
 
 **Raise/lower the frontier ceiling:** edit `max_budget` per deployment. Skew the failover order by reordering deployments or setting asymmetric budgets (e.g. Claude $5/day as primary, others $1/day as emergency spares).
 

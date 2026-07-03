@@ -41,7 +41,7 @@ services:
     environment:
       - HUGGING_FACE_HUB_TOKEN=${HF_TOKEN:-}
     command: >
-      --model ${VLLM_MODEL:-Qwen/Qwen3.6-27B}
+      --model ${VLLM_MODEL:-QuantTrio/Qwen3.6-27B-AWQ}
       --max-model-len ${VLLM_MAX_LEN:-16384}
     volumes:
       - hf_cache:/root/.cache/huggingface

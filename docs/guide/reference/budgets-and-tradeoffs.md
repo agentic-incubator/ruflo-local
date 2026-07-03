@@ -41,9 +41,10 @@ Every design choice trades something. Knowing which lever trades what keeps tuni
 
 **Swap the workhorse model** (one line):
 ```yaml
-model: ollama_chat/qwen3.6-35b-a3b     # was qwen3-coder:30b-a3b — stronger MoE, same ~3B-active speed
+model: ollama_chat/qwen3.6:35b-a3b     # was qwen3-coder:30b-a3b-q4_K_M — stronger MoE, same ~3B-active speed
 ```
-then `docker exec ollama ollama pull qwen3.6-35b-a3b && docker compose restart litellm`.
+then `docker exec ollama ollama pull qwen3.6:35b-a3b && docker compose restart litellm`.
+(Apple Silicon: use `qwen3.6:35b-mlx` for the MLX engine.)
 
 **Raise / lower the frontier ceiling:** edit `max_budget` per deployment. Skew failover order by reordering deployments or setting asymmetric budgets (e.g. Claude $5/day primary, others $1/day emergency spares).
 
