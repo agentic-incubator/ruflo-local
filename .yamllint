@@ -1,0 +1,14 @@
+# yamllint config for the autopilot static gate.
+# Extends the built-in "relaxed" preset (keeps real YAML validation: syntax,
+# duplicate keys, etc.) but disables line-length — the gateway/observability
+# configs carry long inline comments and rendered model tags on purpose, and
+# 80-col warnings were only noise in CI annotations. Replaces the ad-hoc
+# `yamllint -d relaxed` invocation so lint stays consistent locally and in CI.
+extends: relaxed
+rules:
+  line-length: disable
+  # Allow aligned values (e.g. fallback maps line up their `[` columns) — relax only
+  # max-spaces-AFTER the colon; still forbid a space BEFORE it.
+  colons:
+    max-spaces-before: 0
+    max-spaces-after: -1

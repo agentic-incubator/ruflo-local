@@ -45,9 +45,9 @@ jobs:
     name: static
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
           node-version: "22"
 
@@ -60,7 +60,7 @@ jobs:
 
       - name: Lint — yaml + shell + json + node syntax
         run: |
-          yamllint -d relaxed \
+          yamllint -c .yamllint \
             docker-compose.yml \
             config/gateways/litellm-config.yaml \
             config/observability/prometheus.yml \
@@ -146,8 +146,8 @@ jobs:
           --health-cmd "pg_isready -U litellm"
           --health-interval 5s --health-timeout 5s --health-retries 10
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6
         with:
           node-version: "22"
 
@@ -156,7 +156,7 @@ jobs:
         run: echo "tag=$(node -e "console.log(require('./config/model-sets.json').variants.ci.fast)")" >> "$GITHUB_OUTPUT"
 
       - name: Cache Ollama model blobs
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ${{ env.OLLAMA_MODELS }}
           key: ollama-${{ steps.model.outputs.tag }}-${{ hashFiles('config/model-sets.json') }}
@@ -219,8 +219,8 @@ jobs:
           --health-cmd "pg_isready -U litellm"
           --health-interval 5s --health-timeout 5s --health-retries 10
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6
         with:
           node-version: "22"
 
@@ -229,7 +229,7 @@ jobs:
         run: echo "tag=$(node -e "console.log(require('./config/model-sets.json').variants.ci.fast)")" >> "$GITHUB_OUTPUT"
 
       - name: Cache Ollama model blobs
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ${{ env.OLLAMA_MODELS }}
           key: ollama-${{ steps.model.outputs.tag }}-${{ hashFiles('config/model-sets.json') }}
