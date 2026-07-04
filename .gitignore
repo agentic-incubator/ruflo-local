@@ -92,3 +92,4 @@ venv/
 Thumbs.db
 Desktop.ini
 .autopilot/queued/
+agentdb.rvf*
