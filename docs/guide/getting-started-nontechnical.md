@@ -80,7 +80,7 @@ docker compose up -d
 
 **③ Download the local AI models** (this pulls several gigabytes the first time — grab a coffee ☕)
 ```bash
-docker exec ollama ollama pull qwen3-coder:30b-a3b-q4_K_M
+docker exec ollama ollama pull qwen3.6:35b-a3b-q4_K_M
 ```
 > 🍎 **On an Apple Silicon Mac?** A faster "MLX" version of the bigger model is available — pull `qwen3.6:27b-mlx` instead. Your helper (or the Technical Guide) covers the one-line switch.
 

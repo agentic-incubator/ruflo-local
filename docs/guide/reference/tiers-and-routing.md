@@ -12,7 +12,7 @@ The gateway config defines four **aliases**. Clients never name real models — 
 
 | Alias | Serves | Role |
 |---|---|---|
-| `tier-fast` | local MoE `Qwen3-Coder-30B-A3B` (Ollama) | Default workhorse — the "90%" |
+| `tier-fast` | local MoE `Qwen3.6-35B-A3B` (Ollama) | Default workhorse — the "90%" |
 | `tier-heavy` | local dense `Qwen3.6-27B` (Ollama, optionally + vLLM under the same alias) | Harder tasks that still stay on-box |
 | `tier-frontier` | Claude Opus → GPT → Gemini (three deployments, one alias); optionally add hosted open-weight leaders | The "10%": budget-capped, auto-failover between providers |
 | `tier-private` | local dense `Qwen3.6-27B`, **no fallback chain** | Structurally cannot leave your machine |
@@ -100,7 +100,7 @@ RouteLLM repo: https://github.com/lm-sys/RouteLLM · Paper: https://arxiv.org/ab
 
 ## 🧠 Strengthening the routing signal (§1, §2)
 
-> **Status: shipped as enablement config + reference policy** — *not* an automatic behavior change. These are the two highest-leverage, cheapest mitigations from [Limitations & Mitigations](limitations-and-mitigations.md#-strengthening-the-guided-router). This kit ships a reference policy — [`router-policy.example.json`](../../../router-policy.example.json) — you translate into ruflo env/config: enabling the neural router (`CLAUDE_FLOW_ROUTER_NEURAL=1`) is a **real ruflo toggle**, while the per-agent-type **tier floor** is **reference policy** you apply in your own ruflo setup (per-request local-tier *enforcement* is the RFC's proposed tier-schema-v2, not yet upstream). It is **additive**: `ruflo-tiers.json` stays schema v1 and is still consumed unchanged as the per-tier alts map.
+> **Status: shipped as enablement config + reference policy** — *not* an automatic behavior change. These are the two highest-leverage, cheapest mitigations from [Limitations & Mitigations](limitations-and-mitigations.md#-strengthening-the-guided-router). This kit ships a reference policy — [`config/routing/router-policy.example.json`](../../../config/routing/router-policy.example.json) — you translate into ruflo env/config: enabling the neural router (`CLAUDE_FLOW_ROUTER_NEURAL=1`) is a **real ruflo toggle**, while the per-agent-type **tier floor** is **reference policy** you apply in your own ruflo setup (per-request local-tier *enforcement* is the RFC's proposed tier-schema-v2, not yet upstream). It is **additive**: `config/routing/ruflo-tiers.json` stays schema v1 and is still consumed unchanged as the per-tier alts map.
 
 ### Stronger routing signal — score difficulty, not length (§1)
 A router scoring mostly surface features mis-ranks both ways (a short "prove this invariant" is hard; a long file-paste reformat is trivial). Turn on ruflo's **shipped neural router** (k-NN / KRR / FastGRNN over embeddings) instead of the lexical path, feed it non-length features, and reuse the HNSW **semantic route cache** so near-duplicate prompts skip re-scoring:
@@ -114,7 +114,7 @@ export CLAUDE_FLOW_ROUTER_COST_CEILING_USD_PER_MTOK=20   # $20 excludes Sonnet+O
 export CLAUDE_FLOW_ROUTER_EMBED_CACHE_SIZE=4096          # HNSW semantic route cache — near-dupes skip re-scoring
 ```
 
-The non-length features to weight (stack traces, multi-file scope, `prove`/`design`/`refactor-across-files` verbs) are enumerated under `signal.non_length_features` in `router-policy.example.json`.
+The non-length features to weight (stack traces, multi-file scope, `prove`/`design`/`refactor-across-files` verbs) are enumerated under `signal.non_length_features` in `config/routing/router-policy.example.json`.
 
 > ℹ️ The env **names** above are ruflo's documented neural-router surface; the **values** are illustrative starting points — verify the flags against your ruflo build and re-tune against your own metrics ([Observability](observability.md)). These exports also ship pre-listed in [`.env.example`](../../../.env.example) (its client-side section) — set them there, or `export` them in your shell. They're consumed by ruflo, **not** by docker-compose.
 
@@ -122,7 +122,7 @@ The non-length features to weight (stack traces, multi-file scope, `prove`/`desi
 Small local models are specifically weak at **agentic tool-calling and multi-turn orchestration**, and those turns aren't necessarily long — so a length-based router is the *least* equipped to catch them. Treat tool-calling / multi-turn as a **hard escalation signal independent of length**, and give tool-driven agent types a **per-agent-type tier floor** (the router may score down to a cheaper tier, but never *below* the floor):
 
 ```jsonc
-// router-policy.example.json → escalation.tier_floor_by_agent_type
+// config/routing/router-policy.example.json → escalation.tier_floor_by_agent_type
 { "default": "tier-fast", "reviewer": "tier-heavy", "orchestrator": "tier-heavy",
   "tool_user": "tier-heavy", "agentic_multiturn": "tier-frontier" }
 ```
@@ -137,7 +137,7 @@ Ensemble disagreement above `CLAUDE_FLOW_ROUTER_ENSEMBLE_UNCERTAINTY_THRESHOLD` 
 Ruflo keeps its complexity scoring and bandit learning; the gateway serves the tiers:
 
 ```bash
-export CLAUDE_FLOW_ROUTER_OPENROUTER_ALTS=$PWD/ruflo-tiers.json   # ships in this kit
+export CLAUDE_FLOW_ROUTER_OPENROUTER_ALTS=$PWD/config/routing/ruflo-tiers.json   # ships in this kit
 export OPENROUTER_API_KEY=$LITELLM_MASTER_KEY                     # any non-empty value
 export OPENROUTER_BASE_URL=http://localhost:4000/v1               # if honored by your version
 # Fallback wiring if your ruflo build routes OpenRouter traffic only to openrouter.ai:

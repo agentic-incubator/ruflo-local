@@ -83,11 +83,11 @@ docker compose up -d
 ## 📥 Step 2 — Pull local models
 
 ```bash
-docker exec ollama ollama pull qwen3-coder:30b-a3b-q4_K_M   # tier-fast (MoE ~3B active, ~19 GB)
+docker exec ollama ollama pull qwen3.6:35b-a3b-q4_K_M       # tier-fast (MoE ~3B active, ~20 GB)
 docker exec ollama ollama pull qwen3.6:27b                   # tier-heavy (dense ~17 GB) — skip on small boxes
 # native Ollama: just `ollama pull …` on the host
-# 🍎 macOS/Apple Silicon (native host): pull qwen3.6:27b-mlx for tier-heavy (MLX engine).
-#    qwen3-coder has no MLX build — keep qwen3-coder:30b-a3b-q4_K_M.
+# 🍎 macOS/Apple Silicon (native host): pull qwen3.6:35b-mlx for tier-fast and
+#    qwen3.6:27b-mlx for tier-heavy (Apple's MLX engine).
 ```
 
 📖 Model choices and upgrades → [Hardware & Models](reference/hardware-and-models.md).

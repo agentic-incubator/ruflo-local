@@ -10,7 +10,7 @@
       "openrouter_alt": "tier-fast",
       "cost_per_m_tok_in": 0.0,
       "cost_per_m_tok_out": 0.0,
-      "rationale": "Local Qwen3-Coder-30B-A3B (MoE, ~3B active) via gateway alias tier-fast; effectively $0 marginal cost. See docs/guide/reference/hardware-and-models.md."
+      "rationale": "Local Qwen3.6-35B-A3B (MoE, ~3B active, SWE-bench 73.4%) via gateway alias tier-fast; effectively $0 marginal cost. See docs/guide/reference/hardware-and-models.md."
     },
     "sonnet": {
       "anthropic_default": "anthropic/claude-sonnet-4-6",

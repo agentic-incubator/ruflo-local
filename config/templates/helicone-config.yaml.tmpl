@@ -1,0 +1,76 @@
+# =============================================================================
+# Helicone AI Gateway config — mirrors this kit's four tiers as named ROUTERS,
+# for the `helicone` compose profile (COMPOSE_PROFILES=helicone). Helicone is the
+# Rust, native-OTel alternative with rich budgets/caching — see
+# docs/guide/reference/gateway-variants.md.
+#
+# EXPERIMENTAL TEMPLATE — verify keys against https://docs.helicone.ai/ai-gateway/config
+# (custom-provider base_url, budget units, fallback-disable, cache backend all evolve).
+# What MUST hold regardless of schema: the four tier routers exist, and tier-private
+# routes to a SINGLE LOCAL model with NO other models / no fallback (the privacy pin).
+#
+# GENERATED FILE — do not edit helicone-config.yaml by hand. Edit this .tmpl and
+# config/model-sets.json, then run `make render` (scripts/render-configs.mjs). The
+# {{TIER_*_MODEL}} placeholders are filled with the hardware-appropriate local tag
+# (Apple-Silicon => MLX build, else plain) at render time.
+#
+# ADDRESSING NOTE: Helicone routes by router name — clients call
+#   http://localhost:4000/router/tier-fast  (vs LiteLLM/Bifrost model="tier-fast").
+# =============================================================================
+
+providers:
+  # Custom OpenAI-compatible local endpoint (Ollama). Verify the base_url key name
+  # against the config reference. Unlike LiteLLM this is not read from OLLAMA_API_BASE
+  # — host-native Ollama users edit it to http://host.docker.internal:11434/v1.
+  ollama-local:
+    type: openai-compatible
+    base-url: http://ollama:11434/v1
+
+routers:
+  # --- Tier 1: local-fast (default workhorse) ---
+  tier-fast:
+    load-balance:
+      chat:
+        strategy: weighted
+        models:
+          - {{TIER_FAST_MODEL}}   # 36B MoE, ~3B active, SWE-bench 73.4%. Local tag is selected per-hardware by scripts/render-configs.mjs.
+
+  # --- Tier 2: local-heavy ---
+  tier-heavy:
+    load-balance:
+      chat:
+        strategy: weighted
+        models:
+          - {{TIER_HEAVY_MODEL}}   # dense 27B. Local tag is selected per-hardware by scripts/render-configs.mjs (Apple-Silicon MLX build vs plain).
+
+  # --- Tier 3: frontier (budget-capped; latency-balanced across Claude/GPT/Gemini) ---
+  tier-frontier:
+    load-balance:
+      chat:
+        strategy: model-latency
+        models:
+          - anthropic/claude-opus-4-8
+          - openai/gpt-4.1
+          - gemini/gemini-2.5-pro
+    rate-limit:
+      per-api-key:
+        capacity: 60000          # token/$ cap — verify units against the config reference
+        refill-frequency: 1d
+    budget:
+      max-usd-per-day: 7.0       # mirrors the sum of the LiteLLM per-deployment caps
+
+  # --- Privacy-pinned: ONE local model, NO fallback — cannot leave the box ---
+  tier-private:
+    load-balance:
+      chat:
+        strategy: weighted
+        models:
+          - {{TIER_PRIVATE_MODEL}}   # dense 27B. Local tag is selected per-hardware by scripts/render-configs.mjs (Apple-Silicon MLX build vs plain).
+
+# Caching is OPT-IN and left OFF so the standalone variant needs no Redis/S3.
+cache-store:
+  type: disabled
+
+telemetry:
+  otel-endpoint: http://otel-collector:4318
+  prometheus: true

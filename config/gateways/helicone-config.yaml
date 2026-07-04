@@ -9,6 +9,11 @@
 # What MUST hold regardless of schema: the four tier routers exist, and tier-private
 # routes to a SINGLE LOCAL model with NO other models / no fallback (the privacy pin).
 #
+# GENERATED FILE — do not edit helicone-config.yaml by hand. Edit this .tmpl and
+# config/model-sets.json, then run `make render` (scripts/render-configs.mjs). The
+# {{TIER_*_MODEL}} placeholders are filled with the hardware-appropriate local tag
+# (Apple-Silicon => MLX build, else plain) at render time.
+#
 # ADDRESSING NOTE: Helicone routes by router name — clients call
 #   http://localhost:4000/router/tier-fast  (vs LiteLLM/Bifrost model="tier-fast").
 # =============================================================================
@@ -28,7 +33,7 @@ routers:
       chat:
         strategy: weighted
         models:
-          - ollama-local/qwen3-coder:30b-a3b-q4_K_M   # qwen3-coder has no MLX build; macOS/Apple Silicon uses this same tag
+          - ollama-local/qwen3.6:35b-a3b-q4_K_M   # 36B MoE, ~3B active, SWE-bench 73.4%. Local tag is selected per-hardware by scripts/render-configs.mjs.
 
   # --- Tier 2: local-heavy ---
   tier-heavy:
@@ -36,7 +41,7 @@ routers:
       chat:
         strategy: weighted
         models:
-          - ollama-local/qwen3.6:27b   # macOS/Apple Silicon: use ollama-local/qwen3.6:27b-mlx for the MLX engine
+          - ollama-local/qwen3.6:27b-mlx   # dense 27B. Local tag is selected per-hardware by scripts/render-configs.mjs (Apple-Silicon MLX build vs plain).
 
   # --- Tier 3: frontier (budget-capped; latency-balanced across Claude/GPT/Gemini) ---
   tier-frontier:
@@ -60,7 +65,7 @@ routers:
       chat:
         strategy: weighted
         models:
-          - ollama-local/qwen3.6:27b   # macOS/Apple Silicon: use ollama-local/qwen3.6:27b-mlx for the MLX engine
+          - ollama-local/qwen3.6:27b-mlx   # dense 27B. Local tag is selected per-hardware by scripts/render-configs.mjs (Apple-Silicon MLX build vs plain).
 
 # Caching is OPT-IN and left OFF so the standalone variant needs no Redis/S3.
 cache-store:
