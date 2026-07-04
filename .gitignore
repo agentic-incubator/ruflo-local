@@ -93,3 +93,6 @@ Thumbs.db
 Desktop.ini
 .autopilot/queued/
 agentdb.rvf*
+
+# ruvector runtime corpus (real .rvf store — regenerated, not committed)
+.ruvector/
