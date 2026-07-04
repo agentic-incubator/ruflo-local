@@ -191,7 +191,7 @@ jobs:
           done
 
       - name: Local smoke (no escalation)
-        run: SMOKE_LOCAL_ONLY=1 ./smoke-test.sh
+        run: SMOKE_LOCAL_ONLY=1 bash ./smoke-test.sh
 
       - name: LiteLLM logs on failure
         if: failure()
@@ -266,7 +266,7 @@ jobs:
           done
 
       - name: Full smoke (incl. frontier escalation)
-        run: ./smoke-test.sh
+        run: bash ./smoke-test.sh
 
       - name: LiteLLM logs on failure
         if: failure()
