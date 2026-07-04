@@ -82,7 +82,7 @@ training corpus for the per-question router already exists when the gate wants i
 backfill**. This single rule is what makes per-category-first scaffolding rather than a detour.
 
 ### D6 — Stay tier-schema v1 now, adopt v2 at promotion
-**Decision:** keep `ruflo-tiers.json` at **schema v1** through phase 1 and early phase 2;
+**Decision:** keep `config/routing/ruflo-tiers.json` at **schema v1** through phase 1 and early phase 2;
 adopt the RFC's **v2** (per-request `locality`/`base_url`) when the promotion gate fires and
 we want per-request locality control.
 **Why:** per-category + reflex live happily on v1 (respects the autopilot DoD invariant).

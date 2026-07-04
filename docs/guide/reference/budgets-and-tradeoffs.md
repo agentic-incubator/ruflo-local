@@ -25,7 +25,7 @@ Every design choice trades something. Knowing which lever trades what keeps tuni
 
 ---
 
-## 🧬 `litellm-config.yaml` anatomy
+## 🧬 `config/gateways/litellm-config.yaml` anatomy
 
 - **`model_list`** — each entry is a *deployment*: an alias (`model_name`) plus what actually serves it (`litellm_params.model`, `api_base`, keys, budgets, rate caps). **Repeating an alias creates load-balancing + failover** across its deployments.
 - **`litellm_settings.fallbacks`** — the ladder. Order matters; tried left-to-right. `tier-private` appears in no chain — that *absence* is the privacy guarantee.

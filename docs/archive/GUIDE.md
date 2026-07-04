@@ -11,11 +11,11 @@
 | `GUIDE.md` | This document |
 | `docker-compose.yml` | One-command stack: Ollama, LiteLLM gateway, Postgres, Prometheus, Grafana (+ optional vLLM, RouteLLM profiles) |
 | `.env.example` | Copy to `.env`; keys and endpoints |
-| `litellm-config.yaml` | **The heart of the system** — tier aliases, fallback chains, budgets, metrics |
-| `prometheus.yml` / `grafana-datasources.yml` | Observability wiring |
-| `ruflo-tiers.json` | Drop-in tier map for Ruflo/Claude-Flow users (§8.1) |
+| `config/gateways/litellm-config.yaml` | **The heart of the system** — tier aliases, fallback chains, budgets, metrics |
+| `config/observability/prometheus.yml` / `config/observability/grafana-datasources.yml` | Observability wiring |
+| `config/routing/ruflo-tiers.json` | Drop-in tier map for Ruflo/Claude-Flow users (§8.1) |
 | `smoke-test.sh` | Verifies every tier, the fall-through ladder, the privacy pin, and metrics |
-| `routellm.Dockerfile` | Builds the optional learned-router service |
+| `config/gateways/routellm.Dockerfile` | Builds the optional learned-router service |
 
 ---
 
@@ -169,7 +169,7 @@ docker compose --profile router up -d    # adds RouteLLM learned router on :6060
 
 ### 4.1 Tiers are aliases; routing is config
 
-`litellm-config.yaml` defines four **aliases**. Clients never name real models:
+`config/gateways/litellm-config.yaml` defines four **aliases**. Clients never name real models:
 
 | Alias | Serves | Role |
 |---|---|---|
@@ -247,7 +247,7 @@ Every design choice here trades something. Knowing which lever trades what keeps
 
 ## 6. Configuration Deep Dive
 
-### 6.1 `litellm-config.yaml` anatomy
+### 6.1 `config/gateways/litellm-config.yaml` anatomy
 
 - **`model_list`** — each entry is a *deployment*: an alias (`model_name`) plus what actually serves it (`litellm_params.model`, `api_base`, keys, budgets, rate caps). **Repeating an alias creates load-balancing + failover across its deployments** — that's how `tier-frontier` spans three providers and how `tier-heavy` can span Ollama + vLLM.
 - **`litellm_settings.fallbacks`** — the ladder. Order matters; it's tried left-to-right. Note `tier-private` appears in no chain: that *absence* is the privacy guarantee.
@@ -295,7 +295,7 @@ RouteLLM repo (framework, pretrained `mf`/`bert`/`causal_llm` routers, calibrati
 Ruflo keeps its complexity scoring and bandit learning; the gateway serves the tiers:
 
 ```bash
-export CLAUDE_FLOW_ROUTER_OPENROUTER_ALTS=$PWD/ruflo-tiers.json   # ships in this kit
+export CLAUDE_FLOW_ROUTER_OPENROUTER_ALTS=$PWD/config/routing/ruflo-tiers.json   # ships in this kit
 export OPENROUTER_API_KEY=$LITELLM_MASTER_KEY                     # any non-empty value
 export OPENROUTER_BASE_URL=http://localhost:4000/v1               # if honored by your version
 # Fallback wiring if your ruflo build routes OpenRouter traffic only to openrouter.ai:

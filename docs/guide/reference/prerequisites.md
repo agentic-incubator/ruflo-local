@@ -32,7 +32,7 @@ You need these three for any working install.
   ollama pull qwen3.6:27b-mlx               # tier-heavy / tier-private on macOS (~20 GB)
   ollama pull qwen3.6:35b-mlx               # tier-fast on macOS (MoE ~3B active, ~22 GB)
   ```
-  Then set the matching tier in `litellm-config.yaml` (e.g. `ollama_chat/qwen3.6:27b-mlx`).
+  Then set the matching tier in `config/gateways/litellm-config.yaml` (e.g. `ollama_chat/qwen3.6:27b-mlx`).
 - **Verify:**
   ```bash
   ollama --version && ollama list
