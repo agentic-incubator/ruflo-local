@@ -1,0 +1,12 @@
+{
+  "name": "ruflo-local",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Local-first tiered LLM routing kit — learned-routing overlay (scripts/lib/*.mjs)",
+  "license": "MIT",
+  "optionalDependencies": {
+    "@ruvector/rvf": "^0.2.2",
+    "@ruvector/ruvllm": "^0.2.0"
+  },
+  "comment": "Zero-runtime-config kit; the only deps are OPTIONAL ruvector packages used by recorder.mjs — @ruvector/rvf for a real .rvf routing corpus (JSONL fallback when absent) and @ruvector/ruvllm for the IN-PROCESS prompt embedder (no CLI/argv, so a private prompt never hits the process table). Tests use Node's built-in runner (node --test), no test framework."
+}
