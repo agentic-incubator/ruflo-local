@@ -20,9 +20,16 @@ ask tier-fast "Reply with exactly: TIER1-OK" | python3 -c 'import sys,json;d=jso
 hr "Tier 2 (local-heavy) answers"
 ask tier-heavy "Reply with exactly: TIER2-OK" | python3 -c 'import sys,json;d=json.load(sys.stdin);print("model:",d.get("model"),"| reply:",d["choices"][0]["message"]["content"][:60])'
 
-hr "Tier 3 (frontier) answers (needs a provider key; consumes budget)"
-ask tier-frontier "Reply with exactly: TIER3-OK" | python3 -c 'import sys,json;d=json.load(sys.stdin);print("model:",d.get("model"),"| reply:",str(d["choices"][0]["message"]["content"])[:60])' \
-  || echo "(skipped/failed — no frontier key configured?)"
+# SMOKE_LOCAL_ONLY=1 skips every cloud/escalation check (frontier tier). Used by the
+# GitHub Actions local-smoke job, which runs against a tiny local Ollama model with no
+# provider keys — it proves the local-tier + privacy-pin + fallback wiring, no secrets.
+if [ -z "${SMOKE_LOCAL_ONLY:-}" ]; then
+  hr "Tier 3 (frontier) answers (needs a provider key; consumes budget)"
+  ask tier-frontier "Reply with exactly: TIER3-OK" | python3 -c 'import sys,json;d=json.load(sys.stdin);print("model:",d.get("model"),"| reply:",str(d["choices"][0]["message"]["content"])[:60])' \
+    || echo "(skipped/failed — no frontier key configured?)"
+else
+  hr "Tier 3 (frontier) — SKIPPED (SMOKE_LOCAL_ONLY set: local-only run, no escalation)"
+fi
 
 hr "Fall-through drill: force tier-fast to fail → should serve via fallback chain"
 curl -sS "$GW/v1/chat/completions" \

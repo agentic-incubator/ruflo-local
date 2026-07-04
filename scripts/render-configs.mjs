@@ -6,8 +6,10 @@
 // Helicone) from their .tmpl templates, substituting the local tier model tags
 // with the hardware-appropriate variant:
 //
-//   variant = RUFLO_MODEL_VARIANT if it is "mlx" or "gguf";
+//   variant = RUFLO_MODEL_VARIANT if it is "mlx", "gguf", or "ci";
 //             else os.arch() === "arm64" ? "mlx" : "gguf"  (Apple Silicon => mlx)
+//   "ci" is a tiny stand-in variant (see config/model-sets.json) used by the
+//   GitHub Actions local-smoke job, which cannot hold the real multi-GB models.
 //
 // Bare tags live in config/model-sets.json; each gateway gets its own provider
 // prefix applied here. Idempotent: re-running produces byte-identical output.
@@ -28,7 +30,7 @@ const repoRoot = join(__dirname, "..");
 const arch = os.arch();
 const envVariant = process.env.RUFLO_MODEL_VARIANT;
 let variant;
-if (envVariant === "mlx" || envVariant === "gguf") {
+if (envVariant === "mlx" || envVariant === "gguf" || envVariant === "ci") {
   variant = envVariant;
 } else {
   variant = arch === "arm64" ? "mlx" : "gguf";
@@ -39,7 +41,7 @@ const modelSetsPath = join(repoRoot, "config", "model-sets.json");
 const modelSets = JSON.parse(readFileSync(modelSetsPath, "utf8"));
 const tags = modelSets.variants[variant];
 if (!tags) {
-  console.error(`render-configs: unknown variant "${variant}" (expected mlx|gguf)`);
+  console.error(`render-configs: unknown variant "${variant}" (expected mlx|gguf|ci)`);
   process.exit(1);
 }
 const { fast, heavy, private: priv } = tags;

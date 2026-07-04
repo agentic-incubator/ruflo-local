@@ -65,10 +65,17 @@ conventions: |
 # ─────────────────────────────────────────────────────────────────────────────
 ci:
   provider: github
-  ci_is_merge_authority: false      # autonomy is `reviewed`; the LOCAL gate is the authority.
-  # No .github/workflows/ exist. Fine for `reviewed` mode. Going autonomous `pr_ci` later would
-  # require scaffolding a base-scoped CI workflow first (detect will offer this at that time).
-  base_coverage: none
+  ci_is_merge_authority: true       # autonomy is `pr_ci`; the `static` job in autopilot-gate.yml is the merge gate.
+  # .github/workflows/autopilot-gate.yml is base-scoped to PRs into develop+main. Coverage is LAYERED:
+  #   * static      — REQUIRED merge authority (yamllint+shellcheck+jq+node --check/--test+compose config).
+  #                   No models, hardware-neutral → runs on any hosted runner. Mark THIS as the required
+  #                   status check on `develop` branch protection so autopilot's STEP-D guard sees it.
+  #   * local-smoke — advisory: Ollama + tiny cached `ci`-variant model, LOCAL tiers only (no secrets).
+  #   * escalation  — optional: full smoke incl. frontier; self-skips unless a provider key secret exists.
+  # The Ollama-backed LIVE gateway smoke against the REAL multi-GB tiers stays a LOCAL check (can't run
+  # on hosted runners) — CI gates the static contract + a tiny-model wiring proof.
+  base_coverage: covered
+  required_check: "static"          # the check name autopilot waits on before squash-merging a phase PR
 
 # ─────────────────────────────────────────────────────────────────────────────
 # SECURITY INVARIANTS — non-negotiables the gate greps the diff for every phase.

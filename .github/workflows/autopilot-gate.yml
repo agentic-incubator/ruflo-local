@@ -1,0 +1,273 @@
+# =============================================================================
+# autopilot-gate.yml — base-scoped CI for ruflo-local's autopilot pipeline.
+#
+# Autonomy is `pr_ci`: each phase opens a PR into `develop` and autopilot will
+# only squash-merge it when the REQUIRED check below is green. Because the real
+# local tiers are multi-GB Ollama models that CANNOT run on GitHub hosted
+# runners, coverage is LAYERED:
+#
+#   1. static      — REQUIRED. The merge authority. No models, hardware-neutral:
+#                    yamllint + shellcheck + jq + node --check/--test + compose config.
+#                    Mark THIS job as the required status check on `develop`.
+#   2. local-smoke — OPTIONAL/advisory. Installs Ollama, caches a tiny stand-in
+#                    model, renders the `ci` model variant, and runs the LOCAL-tier
+#                    subset of the smoke test (fast/heavy/privacy-pin/fallback).
+#                    No secrets. Proves the gateway wiring end-to-end.
+#   3. escalation  — OPTIONAL. Same as local-smoke PLUS the frontier tier, and it
+#                    ONLY runs when a provider key is present as a repo secret.
+#                    Skips gracefully (never fails) when no secret is configured.
+#
+# Flexibility knobs:
+#   * The CI stand-in model is one line in config/model-sets.json (variants.ci).
+#   * Plumb OPENAI_API_KEY / ANTHROPIC_API_KEY / GEMINI_API_KEY as repo secrets to
+#     light up the escalation job; leave them unset and it self-skips.
+# =============================================================================
+name: autopilot-gate
+
+on:
+  pull_request:
+    branches: [develop, main]
+  push:
+    branches: [develop, main]
+  workflow_dispatch:
+
+# One in-flight run per ref; newer pushes cancel older ones.
+concurrency:
+  group: autopilot-gate-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  # ── 1. STATIC GATE — the required merge authority (no models, ~1 min) ───────
+  static:
+    name: static
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install lint tooling
+        run: |
+          python3 -m pip install --quiet yamllint
+          # shellcheck and jq are preinstalled on ubuntu-latest.
+          shellcheck --version
+          jq --version
+
+      - name: Lint — yaml + shell + json + node syntax
+        run: |
+          yamllint -d relaxed \
+            docker-compose.yml \
+            config/gateways/litellm-config.yaml \
+            config/observability/prometheus.yml \
+            config/observability/grafana-datasources.yml \
+            config/observability/otel-collector-config.yaml \
+            config/gateways/helicone-config.yaml
+          shellcheck smoke-test.sh scripts/*.sh
+          jq -e . \
+            config/routing/ruflo-tiers.json \
+            config/routing/router-policy.example.json \
+            config/gateways/bifrost-config.json >/dev/null
+          # Tolerant Node ESM syntax check — no-op until scripts/lib/ exists (Phase 1).
+          rc=0
+          if [ -d scripts/lib ]; then
+            while IFS= read -r f; do node --check "$f" || rc=1; done \
+              < <(find scripts/lib -name "*.mjs")
+          fi
+          exit $rc
+
+      - name: Build — render + compose config (+ cargo once gateway/ exists)
+        run: |
+          # render is arch-aware (committed configs are one arch's snapshot), so we don't
+          # diff against committed output here — we assert the pipeline RENDERS cleanly and
+          # the resulting merged Compose file is valid. Use the ci variant for a stable check.
+          RUFLO_MODEL_VARIANT=ci node scripts/render-configs.mjs
+          docker compose config -q
+          if [ -f gateway/Cargo.toml ]; then
+            cargo build --release --manifest-path gateway/Cargo.toml
+          fi
+
+      - name: Unit tests — node:test (+ cargo test once gateway/ exists)
+        run: |
+          rc=0
+          if ls scripts/lib/__tests__/*.test.mjs >/dev/null 2>&1; then
+            node --test scripts/lib/__tests__/ || rc=1
+          else
+            echo "no scripts/lib/__tests__/*.test.mjs yet — skipped (Phase 1 adds them)"
+          fi
+          if [ -f gateway/Cargo.toml ]; then
+            cargo test --manifest-path gateway/Cargo.toml || rc=1
+          fi
+          exit $rc
+
+  # ── preflight — detect whether a frontier provider key is available ─────────
+  # Secrets can't be read in job-level `if:`, so we surface it as an output here.
+  preflight:
+    name: preflight
+    runs-on: ubuntu-latest
+    outputs:
+      has_frontier_key: ${{ steps.probe.outputs.has_frontier_key }}
+    steps:
+      - id: probe
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        run: |
+          if [ -n "$OPENAI_API_KEY" ] || [ -n "$ANTHROPIC_API_KEY" ] || [ -n "$GEMINI_API_KEY" ]; then
+            echo "has_frontier_key=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_frontier_key=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  # ── 2. LOCAL SMOKE — Ollama + tiny cached model, LOCAL tiers only, no secrets ─
+  local-smoke:
+    name: local-smoke
+    runs-on: ubuntu-latest
+    # Advisory: not a required check. Skip on draft PRs to save runner minutes.
+    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false }}
+    env:
+      OLLAMA_MODELS: ${{ github.workspace }}/.ollama-models
+      GW: http://localhost:4000
+      LITELLM_MASTER_KEY: sk-local-master
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: litellm
+          POSTGRES_PASSWORD: litellm
+          POSTGRES_DB: litellm
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U litellm"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Resolve CI stand-in model tag
+        id: model
+        run: echo "tag=$(node -e "console.log(require('./config/model-sets.json').variants.ci.fast)")" >> "$GITHUB_OUTPUT"
+
+      - name: Cache Ollama model blobs
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.OLLAMA_MODELS }}
+          key: ollama-${{ steps.model.outputs.tag }}-${{ hashFiles('config/model-sets.json') }}
+
+      - name: Install & start Ollama, pull the stand-in model
+        run: |
+          curl -fsSL https://ollama.com/install.sh | sh
+          mkdir -p "$OLLAMA_MODELS"
+          OLLAMA_MODELS="$OLLAMA_MODELS" ollama serve &
+          # Wait for the Ollama API before pulling.
+          for i in $(seq 1 30); do curl -sf http://localhost:11434/api/version && break || sleep 1; done
+          ollama pull "${{ steps.model.outputs.tag }}"
+
+      - name: Render the CI gateway config (tiny stand-in for every tier)
+        run: RUFLO_MODEL_VARIANT=ci node scripts/render-configs.mjs
+
+      - name: Start LiteLLM against local Ollama
+        run: |
+          docker run -d --name litellm --network host \
+            -e OLLAMA_API_BASE=http://localhost:11434 \
+            -e LITELLM_MASTER_KEY="$LITELLM_MASTER_KEY" \
+            -e DATABASE_URL=postgresql://litellm:litellm@localhost:5432/litellm \
+            -e OPENAI_API_KEY=sk-ci-unused \
+            -e ANTHROPIC_API_KEY=sk-ci-unused \
+            -e GEMINI_API_KEY=sk-ci-unused \
+            -v "$PWD/config/gateways/litellm-config.yaml:/app/config.yaml" \
+            ghcr.io/berriai/litellm:v1.83.14-stable --config /app/config.yaml --port 4000
+          # Wait for the gateway to report healthy.
+          for i in $(seq 1 60); do
+            curl -sf "$GW/health/liveliness" && break || sleep 2
+            if [ "$i" = 60 ]; then echo "::error::LiteLLM never became healthy"; docker logs litellm; exit 1; fi
+          done
+
+      - name: Local smoke (no escalation)
+        run: SMOKE_LOCAL_ONLY=1 ./smoke-test.sh
+
+      - name: LiteLLM logs on failure
+        if: failure()
+        run: docker logs litellm || true
+
+  # ── 3. ESCALATION — full smoke incl. frontier; only when a key is configured ─
+  escalation:
+    name: escalation
+    needs: preflight
+    if: ${{ needs.preflight.outputs.has_frontier_key == 'true' }}
+    runs-on: ubuntu-latest
+    env:
+      OLLAMA_MODELS: ${{ github.workspace }}/.ollama-models
+      GW: http://localhost:4000
+      LITELLM_MASTER_KEY: sk-local-master
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: litellm
+          POSTGRES_PASSWORD: litellm
+          POSTGRES_DB: litellm
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U litellm"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Resolve CI stand-in model tag
+        id: model
+        run: echo "tag=$(node -e "console.log(require('./config/model-sets.json').variants.ci.fast)")" >> "$GITHUB_OUTPUT"
+
+      - name: Cache Ollama model blobs
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.OLLAMA_MODELS }}
+          key: ollama-${{ steps.model.outputs.tag }}-${{ hashFiles('config/model-sets.json') }}
+
+      - name: Install & start Ollama, pull the stand-in model
+        run: |
+          curl -fsSL https://ollama.com/install.sh | sh
+          mkdir -p "$OLLAMA_MODELS"
+          OLLAMA_MODELS="$OLLAMA_MODELS" ollama serve &
+          for i in $(seq 1 30); do curl -sf http://localhost:11434/api/version && break || sleep 1; done
+          ollama pull "${{ steps.model.outputs.tag }}"
+
+      - name: Render the CI gateway config
+        run: RUFLO_MODEL_VARIANT=ci node scripts/render-configs.mjs
+
+      - name: Start LiteLLM with real provider keys
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        run: |
+          docker run -d --name litellm --network host \
+            -e OLLAMA_API_BASE=http://localhost:11434 \
+            -e LITELLM_MASTER_KEY="$LITELLM_MASTER_KEY" \
+            -e DATABASE_URL=postgresql://litellm:litellm@localhost:5432/litellm \
+            -e OPENAI_API_KEY="${OPENAI_API_KEY:-sk-ci-unused}" \
+            -e ANTHROPIC_API_KEY="${ANTHROPIC_API_KEY:-sk-ci-unused}" \
+            -e GEMINI_API_KEY="${GEMINI_API_KEY:-sk-ci-unused}" \
+            -v "$PWD/config/gateways/litellm-config.yaml:/app/config.yaml" \
+            ghcr.io/berriai/litellm:v1.83.14-stable --config /app/config.yaml --port 4000
+          for i in $(seq 1 60); do
+            curl -sf "$GW/health/liveliness" && break || sleep 2
+            if [ "$i" = 60 ]; then echo "::error::LiteLLM never became healthy"; docker logs litellm; exit 1; fi
+          done
+
+      - name: Full smoke (incl. frontier escalation)
+        run: ./smoke-test.sh
+
+      - name: LiteLLM logs on failure
+        if: failure()
+        run: docker logs litellm || true
