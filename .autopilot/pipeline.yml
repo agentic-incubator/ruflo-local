@@ -31,9 +31,11 @@ references:
 
 # Branch model. trunk is NEVER auto-merged — a human merges the final PR.
 trunk: main
-base:  autopilot/local-first-learned-routing   # the experimental integration branch this work lands on
+base:  develop              # integration branch — autopilot phase PRs (pr_ci) target this; the final develop→main (trunk) PR is human-merged
 
-autonomy: reviewed          # implement one phase, commit a `gate PASSED` marker, STOP for inspection
+autonomy: pr_ci             # each phase → its own feature branch → PR into base (develop) → squash-merge on GREEN required CI; when all phases land, one develop→main PR (human-merged).
+                            # REQUIRES base-scoped CI on PRs into develop (.github/workflows/*). Run `autopilot:detect` next session — it will offer to scaffold the gate workflow.
+                            # CAVEAT: this kit's live gate (Ollama-backed gateway smoke test) CANNOT run on hosted GitHub runners (no local models), so CI gates STATIC checks only (lint + `docker compose config` + node --test). Live tier-serving stays a local check.
 fix_budget: 5
 
 # Phases with real behavioral blast radius get the heavier adversarial review:
