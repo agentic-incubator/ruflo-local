@@ -95,7 +95,7 @@ jobs:
         run: |
           rc=0
           if ls scripts/lib/__tests__/*.test.mjs >/dev/null 2>&1; then
-            node --test scripts/lib/__tests__/ || rc=1
+            node --test scripts/lib/__tests__/*.test.mjs || rc=1
           else
             echo "no scripts/lib/__tests__/*.test.mjs yet — skipped (Phase 1 adds them)"
           fi

@@ -76,7 +76,7 @@ phases:
       - "Thin bash shims kept so existing callers/CI still resolve."
     definition_of_done:
       - "cmd: for f in scripts/lib/verify-escalate.mjs scripts/lib/budget-snapshot.mjs scripts/lib/bench-gateway.mjs scripts/lib/quality-regression.mjs scripts/lib/gateway-client.mjs scripts/lib/reward.mjs scripts/lib/config.mjs; do node --check \"$f\" || exit 1; done  — every module parses"
-      - "cmd: node --test scripts/lib/__tests__/  — unit tests pass"
+      - "cmd: node --test scripts/lib/__tests__/*.test.mjs  — unit tests pass (glob form: portable across Node 22 CI and Node >=23 local; `node --test <dir>` was removed in Node 23)"
       - "cmd: node scripts/lib/verify-escalate.mjs --help  — prints usage, exits 0"
       - "grep: position-swap|swap-averaged|rubric in scripts/lib/verify-escalate.mjs  — judge-bias mitigation preserved"
       - "cmd: ! git grep -nE 'child_process|execSync|require\\(.child_process' -- scripts/lib/verify-escalate.mjs  — the judge does not shell out (pure node, portable)"

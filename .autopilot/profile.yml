@@ -25,7 +25,7 @@ commands:
   build:           "docker compose config -q && bash -c 'if [ -f gateway/Cargo.toml ]; then cargo build --release --manifest-path gateway/Cargo.toml; fi'"
   # Node built-in test runner over scripts/lib/__tests__/ (tolerant before any test exists), plus
   # cargo test once gateway/ exists. No package.json / vitest — node:test + node:assert only.
-  test:            "bash -c 'rc=0; if ls scripts/lib/__tests__/*.test.mjs >/dev/null 2>&1; then node --test scripts/lib/__tests__/ || rc=1; fi; if [ -f gateway/Cargo.toml ]; then cargo test --manifest-path gateway/Cargo.toml || rc=1; fi; exit $rc'"
+  test:            "bash -c 'rc=0; if ls scripts/lib/__tests__/*.test.mjs >/dev/null 2>&1; then node --test scripts/lib/__tests__/*.test.mjs || rc=1; fi; if [ -f gateway/Cargo.toml ]; then cargo test --manifest-path gateway/Cargo.toml || rc=1; fi; exit $rc'"
   # End-to-end drill against the running gateway (health, tier routing, fallback, privacy pin, metrics).
   test_integration: "./smoke-test.sh"
   # No UI package.
