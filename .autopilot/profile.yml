@@ -19,7 +19,7 @@ commands:
   # Static validation: every config artifact (yamllint + shellcheck + json parse) PLUS a
   # tolerant syntax check of any Node ESM modules (node --check via find — portable to macOS
   # bash 3.2, recurses into __tests__/, and is a clean no-op before scripts/lib/ exists).
-  lint:            "yamllint -d relaxed docker-compose.yml litellm-config.yaml prometheus.yml grafana-datasources.yml otel-collector-config.yaml helicone-config.yaml && shellcheck smoke-test.sh scripts/*.sh && jq -e . ruflo-tiers.json router-policy.example.json bifrost-config.json >/dev/null && bash -c 'rc=0; if [ -d scripts/lib ]; then while IFS= read -r f; do node --check \"$f\" || rc=1; done < <(find scripts/lib -name \"*.mjs\"); fi; exit $rc'"
+  lint:            "yamllint -d relaxed docker-compose.yml config/gateways/litellm-config.yaml config/observability/prometheus.yml config/observability/grafana-datasources.yml config/observability/otel-collector-config.yaml config/gateways/helicone-config.yaml && shellcheck smoke-test.sh scripts/*.sh && jq -e . config/routing/ruflo-tiers.json config/routing/router-policy.example.json config/gateways/bifrost-config.json >/dev/null && bash -c 'rc=0; if [ -d scripts/lib ]; then while IFS= read -r f; do node --check \"$f\" || rc=1; done < <(find scripts/lib -name \"*.mjs\"); fi; exit $rc'"
   # No compile step for the config layer; validate the merged Compose file renders. Once the
   # Phase-8 Rust sidecar exists, also build it (failure propagates — no masking).
   build:           "docker compose config -q && bash -c 'if [ -f gateway/Cargo.toml ]; then cargo build --release --manifest-path gateway/Cargo.toml; fi'"
@@ -41,9 +41,9 @@ commands:
 conventions: |
   # Repo layout: all runtime config lives at repo root, not under src/.
   #   - docker-compose.yml            — service topology (ollama, vllm, litellm/bifrost/helicone, routellm, prometheus, grafana)
-  #   - litellm-config.yaml           — gateway model_list + tier aliases (tier-fast/heavy/frontier/private) + fallbacks
-  #   - ruflo-tiers.json              — ruflo tier-routing map (schema v1 until Phase 6, then v2)
-  #   - router-policy.example.json    — non-length routing features + per-agent-type tier floors
+  #   - config/gateways/litellm-config.yaml           — gateway model_list + tier aliases (tier-fast/heavy/frontier/private) + fallbacks
+  #   - config/routing/ruflo-tiers.json              — ruflo tier-routing map (schema v1 until Phase 6, then v2)
+  #   - config/routing/router-policy.example.json    — non-length routing features + per-agent-type tier floors
   #   - smoke-test.sh + scripts/*.sh  — bash + curl end-to-end drills (GW/KEY overridable via env)
   # NEW Node layer (this pipeline):
   #   - scripts/lib/*.mjs             — portable Node ESM modules (verify-escalate, budget-snapshot,

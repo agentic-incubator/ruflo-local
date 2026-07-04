@@ -23,8 +23,8 @@ references:
     - "docs/guide/reference/limitations-and-mitigations.md"       # the guided-router §12 gaps this loop closes (esp. §3 in-band quality)
     - "docs/guide/reference/tiers-and-routing.md"                 # CLAUDE_FLOW_ROUTER_* env surface, tier aliases, neural-router activation
     - "docs/research/metaharness-and-ruflo-local.md"              # metaharness compose, the two-learners caveat (Phase 7)
-    - "router-policy.example.json"                                # tier floors + non-length features (per-category signal)
-    - "ruflo-tiers.json"                                          # v1 per-tier alts (must stay v1 through Phase 5)
+    - "config/routing/router-policy.example.json"                                # tier floors + non-length features (per-category signal)
+    - "config/routing/ruflo-tiers.json"                                          # v1 per-tier alts (must stay v1 through Phase 5)
     - "scripts/verify-escalate.sh"                                # the bash judge Phase 1 ports to .mjs (behavior-preserving)
     - "scripts/budget-snapshot.sh"                                # the budget→steering snapshot Phase 1 ports + Phase 4 consumes
     - "tests/quality-prompts.jsonl"                               # the labeled corpus that seeds the learner + parity tests
@@ -121,16 +121,16 @@ phases:
   - id: 4
     goal: "Route per-category as the champion and make budget STEER the decision (not just alert): honor per-agent-type/task-class tier floors, feed the budget snapshot into route(), and invoke ruflo's router in the product path — all on tier-schema v1."
     deliverables:
-      - "scripts/lib/router.mjs — the per-category champion: picks a tier by task class/agent type honoring router-policy.example.json tier floors, with budget-snapshot.mjs demoting frontier per the utilization rungs; invokes ruflo route() in the product path (the Phase-0-deferred wiring)."
+      - "scripts/lib/router.mjs — the per-category champion: picks a tier by task class/agent type honoring config/routing/router-policy.example.json tier floors, with budget-snapshot.mjs demoting frontier per the utilization rungs; invokes ruflo route() in the product path (the Phase-0-deferred wiring)."
       - "Node built-in (node:test) tests: tier floors are never violated; rising budget utilization demotes then masks frontier per the rungs; tier-private is never demoted off-box."
     definition_of_done:
-      - "cmd: jq -e '._meta.schema_version == 1' ruflo-tiers.json  — v1 invariant still holds through the champion phase"
+      - "cmd: jq -e '._meta.schema_version == 1' config/routing/ruflo-tiers.json  — v1 invariant still holds through the champion phase"
       - "cmd: node --check scripts/lib/router.mjs"
       - "cmd: node --test scripts/lib/__tests__/router.test.mjs  — floor + budget-demotion tests pass"
-      - "grep: tier_floor|tier-floor in router-policy.example.json  — per-category floors are the routing signal"
+      - "grep: tier_floor|tier-floor in config/routing/router-policy.example.json  — per-category floors are the routing signal"
       - "grep: budget in scripts/lib/router.mjs  — budget is an input to the decision, not just an alert"
       - "grep:absent: TODO|FIXME in scripts/lib/router.mjs"
-    conventions: "Stay on ruflo-tiers.json v1 (no per-request locality yet). The router may score a request DOWN but never below its agent-type floor. Frontier share should trend toward the ~10% target but is not hard-gated here (that is measured, not asserted, at this phase)."
+    conventions: "Stay on config/routing/ruflo-tiers.json v1 (no per-request locality yet). The router may score a request DOWN but never below its agent-type floor. Frontier share should trend toward the ~10% target but is not hard-gated here (that is measured, not asserted, at this phase)."
     depends_on: [1, 2, 3]
     adrs:  []
     ddd:   []
@@ -157,14 +157,14 @@ phases:
 
   # ── D6: per-request locality (gated on promotion) ────────────────────────────
   - id: 6
-    goal: "Adopt tier-schema v2 so the promoted per-question router can pick local-vs-frontier per request (not just per tier alias): migrate ruflo-tiers.json to v2 with per-request locality/base_url and flip the invariant check. Gated to run after Phase 5 promotion."
+    goal: "Adopt tier-schema v2 so the promoted per-question router can pick local-vs-frontier per request (not just per tier alias): migrate config/routing/ruflo-tiers.json to v2 with per-request locality/base_url and flip the invariant check. Gated to run after Phase 5 promotion."
     deliverables:
-      - "ruflo-tiers.json migrated to schema v2 (per-request locality + base_url), preserving the four-tier vocabulary and the tier-private no-fallback pin."
+      - "config/routing/ruflo-tiers.json migrated to schema v2 (per-request locality + base_url), preserving the four-tier vocabulary and the tier-private no-fallback pin."
       - "The v1 schema-invariant check updated to v2 across the pipeline/profile; docs/guide/reference/tiers-and-routing.md updated for the v2 shape."
     definition_of_done:
-      - "cmd: jq -e '._meta.schema_version == 2' ruflo-tiers.json  — v2 adopted"
-      - "cmd: jq -e '[.. | objects | select(has(\"locality\"))] | length > 0' ruflo-tiers.json  — per-request locality present"
-      - "cmd: jq -e . ruflo-tiers.json >/dev/null  — still valid JSON"
+      - "cmd: jq -e '._meta.schema_version == 2' config/routing/ruflo-tiers.json  — v2 adopted"
+      - "cmd: jq -e '[.. | objects | select(has(\"locality\"))] | length > 0' config/routing/ruflo-tiers.json  — per-request locality present"
+      - "cmd: jq -e . config/routing/ruflo-tiers.json >/dev/null  — still valid JSON"
       - "grep: locality in docs/guide/reference/tiers-and-routing.md  — v2 documented"
       - "cmd: docker compose config -q  — the stack still assembles"
     conventions: "Do NOT break the four-tier alias vocabulary or the tier-private local-only guarantee. This phase runs only once Phase 5 has actually promoted a per-question router (the gated follow-on)."

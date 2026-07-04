@@ -69,7 +69,7 @@ services:
     ports:
       - "4000:4000"
     volumes:
-      - ./litellm-config.yaml:/app/config.yaml:ro
+      - ./config/gateways/litellm-config.yaml:/app/config.yaml:ro
     environment:
       - LITELLM_MASTER_KEY=${LITELLM_MASTER_KEY:-sk-local-master}
       - DATABASE_URL=postgresql://litellm:litellm@litellm_db:5432/litellm
@@ -115,7 +115,7 @@ services:
     ports:
       - "4000:8080"
     volumes:
-      - ./bifrost-config.json:/app/data/config.json:ro
+      - ./config/gateways/bifrost-config.json:/app/data/config.json:ro
     environment:
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
@@ -139,7 +139,7 @@ services:
     ports:
       - "4000:8080"
     volumes:
-      - ./helicone-config.yaml:/app/config.yaml:ro
+      - ./config/gateways/helicone-config.yaml:/app/config.yaml:ro
     environment:
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
@@ -157,7 +157,7 @@ services:
   routellm:
     build:
       context: .
-      dockerfile: routellm.Dockerfile
+      dockerfile: config/gateways/routellm.Dockerfile
     container_name: routellm
     profiles: ["router"]
     depends_on:
@@ -184,7 +184,7 @@ services:
     image: otel/opentelemetry-collector-contrib:0.116.0
     container_name: otel-collector
     volumes:
-      - ./otel-collector-config.yaml:/etc/otelcol-contrib/config.yaml:ro
+      - ./config/observability/otel-collector-config.yaml:/etc/otelcol-contrib/config.yaml:ro
     ports:
       - "4317:4317"   # OTLP gRPC
       - "4318:4318"   # OTLP HTTP (gateway posts here)
@@ -197,7 +197,7 @@ services:
     ports:
       - "9090:9090"
     volumes:
-      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./config/observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - prom_data:/prometheus
     restart: unless-stopped
 
@@ -210,7 +210,7 @@ services:
       - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:-admin}
       - GF_AUTH_ANONYMOUS_ENABLED=false
     volumes:
-      - ./grafana-datasources.yml:/etc/grafana/provisioning/datasources/datasources.yml:ro
+      - ./config/observability/grafana-datasources.yml:/etc/grafana/provisioning/datasources/datasources.yml:ro
       - grafana_data:/var/lib/grafana
     restart: unless-stopped
 

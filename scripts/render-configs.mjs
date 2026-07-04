@@ -54,9 +54,9 @@ const prefixers = {
 };
 
 const gateways = [
-  { name: "litellm",  tmpl: "config/templates/litellm-config.yaml.tmpl",  out: "litellm-config.yaml" },
-  { name: "bifrost",  tmpl: "config/templates/bifrost-config.json.tmpl",  out: "bifrost-config.json" },
-  { name: "helicone", tmpl: "config/templates/helicone-config.yaml.tmpl", out: "helicone-config.yaml" },
+  { name: "litellm",  tmpl: "config/templates/litellm-config.yaml.tmpl",  out: "config/gateways/litellm-config.yaml" },
+  { name: "bifrost",  tmpl: "config/templates/bifrost-config.json.tmpl",  out: "config/gateways/bifrost-config.json" },
+  { name: "helicone", tmpl: "config/templates/helicone-config.yaml.tmpl", out: "config/gateways/helicone-config.yaml" },
 ];
 
 // ---- 4. Render each gateway --------------------------------------------------
