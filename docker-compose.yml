@@ -60,7 +60,7 @@ services:
   # COMPOSE_PROFILES=litellm so `docker compose up -d` still yields LiteLLM.
   # See docs/guide/reference/gateway-variants.md.
   litellm:
-    image: ghcr.io/berriai/litellm:main-stable
+    image: ghcr.io/berriai/litellm:v1.83.14-stable  # PINNED (was floating main-stable=1.90.3, which hit the "healthy Ollama but router registers 0 deployments" bug — BerriAI/litellm#11330; main-stable is also deprecated as of 2026-06-30). Pin a content tag per LiteLLM guidance.
     container_name: litellm
     profiles: ["litellm"]
     depends_on:

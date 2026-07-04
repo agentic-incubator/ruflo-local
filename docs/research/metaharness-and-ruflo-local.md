@@ -39,7 +39,7 @@ ask for **model aliases**; the gateway decides what physically serves each one:
 
 | Alias | Serves (default) | Locality | Guardrail |
 |-------|------------------|----------|-----------|
-| `tier-fast` | `ollama_chat/qwen3-coder:30b-a3b` (MoE, ~3B active) | local | workhorse, ~90% of traffic |
+| `tier-fast` | `ollama_chat/qwen3.6:35b-a3b` (MoE, ~3B active) | local | workhorse, ~90% of traffic |
 | `tier-heavy` | `ollama_chat/qwen3.6:27b` (dense) | local | up-tier target |
 | `tier-frontier` | Claude Opus → GPT-4.1 → Gemini 2.5 Pro | cloud | per-deployment `max_budget` + `budget_duration`, auto-failover |
 | `tier-private` | `ollama_chat/qwen3.6:27b`, **local-only** | local | ✅ deliberately absent from every fallback chain — can never escalate off-box |

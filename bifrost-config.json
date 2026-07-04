@@ -6,7 +6,7 @@
   },
 
   "providers": {
-    "_ollama_note": "base_url is the IN-CONTAINER ollama URL; unlike LiteLLM this is not read from OLLAMA_API_BASE. Host-native Ollama (macOS/Windows, --scale ollama=0): change this to http://host.docker.internal:11434/v1 — see gateway-variants.md. macOS/Apple Silicon: swap tier-heavy/tier-private model to qwen3.6:27b-mlx for the MLX engine (qwen3-coder has no MLX build, so tier-fast keeps its tag).",
+    "_ollama_note": "base_url is the IN-CONTAINER ollama URL; unlike LiteLLM this is not read from OLLAMA_API_BASE. Host-native Ollama (macOS/Windows, --scale ollama=0): change this to http://host.docker.internal:11434/v1 — see gateway-variants.md. macOS/Apple Silicon: use the MLX builds — tier-heavy/tier-private on qwen3.6:27b-mlx, tier-fast on qwen3.6:35b-mlx.",
     "ollama":    { "type": "openai_compatible", "base_url": "http://ollama:11434/v1" },
     "anthropic": { "type": "anthropic", "api_key": "env.ANTHROPIC_API_KEY" },
     "openai":    { "type": "openai",    "api_key": "env.OPENAI_API_KEY" },
@@ -14,8 +14,8 @@
   },
 
   "models": {
-    "tier-fast":  { "provider": "ollama", "model": "qwen3-coder:30b-a3b-q4_K_M", "locality": "local" },
-    "tier-heavy": { "provider": "ollama", "model": "qwen3.6:27b", "locality": "local" },
+    "tier-fast":  { "provider": "ollama", "model": "qwen3.6:35b-a3b-q4_K_M", "locality": "local" },
+    "tier-heavy": { "provider": "ollama", "model": "qwen3.6:27b-mlx", "locality": "local" },
     "tier-frontier": {
       "provider": "anthropic",
       "model": "claude-opus-4-8",
@@ -25,7 +25,7 @@
     },
     "tier-private": {
       "provider": "ollama",
-      "model": "qwen3.6:27b",
+      "model": "qwen3.6:27b-mlx",
       "locality": "local",
       "fallbacks": []
     }

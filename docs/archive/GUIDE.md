@@ -36,7 +36,7 @@ flowchart LR
         FB --> BG["Budget gates<br/>$/day per provider · RPM/TPM"]
     end
 
-    GW -->|"~90%"| L1["Ollama :11434<br/>Qwen3-Coder-30B-A3B / Qwen3.6-27B<br/>your hardware"]
+    GW -->|"~90%"| L1["Ollama :11434<br/>Qwen3.6-35B-A3B / Qwen3.6-27B<br/>your hardware"]
     GW -->|"optional"| L2["vLLM :8000<br/>Qwen3.6-27B AWQ, high concurrency"]
     GW -->|"~10%, budget-capped"| F["Claude → GPT → Gemini<br/>auto-failover between them"]
 
@@ -57,10 +57,10 @@ The core idea: **every tool you own points at one URL** (`http://localhost:4000/
 
 | Your machine | Realistic local tiers | Notes |
 |---|---|---|
-| 16 GB RAM, no GPU / small GPU | tier-fast = a 7–14B **dense** coder (Q4) only | The 30B-A3B MoE below needs ~19–22 GB and won't fit; skip tier-heavy locally and let its fallback go straight to frontier |
-| 24–32 GB RAM or 12–16 GB VRAM | tier-fast = `Qwen3-Coder-30B-A3B` (MoE, ~3B active) at Q4; no local tier-heavy | The MoE fits in ~19–22 GB and runs at dense-7B speed; a dense 27B tier-heavy wants more room, so fall its heavy tier through to frontier |
-| Apple Silicon 32–64 GB unified | tier-fast = `Qwen3-Coder-30B-A3B` (MoE) · tier-heavy = `Qwen3.6-27B` (dense) | **Run Ollama natively on the host** (Docker has no Apple-GPU access) — see §3, step 2 |
-| NVIDIA 24 GB+ (3090/4090/5090…) | tier-fast = `Qwen3-Coder-30B-A3B` (or `Qwen3.6-35B-A3B`) · tier-heavy = `Qwen3.6-27B`-AWQ on vLLM | Dense 27B at Q4/AWQ is ~16–17 GB weights + KV — fits 24 GB for moderate context; enable the `gpu` profile for ~2× throughput at concurrency |
+| 16 GB RAM, no GPU / small GPU | tier-fast = a 7–14B **dense** coder (Q4) only | The 35B-A3B MoE below needs ~20+ GB and won't fit; skip tier-heavy locally and let its fallback go straight to frontier |
+| 24–32 GB RAM or 12–16 GB VRAM | tier-fast = `Qwen3.6-35B-A3B` (MoE, ~3B active) at Q4; no local tier-heavy | The MoE fits in ~20 GB and runs at dense-7B speed; a dense 27B tier-heavy wants more room, so fall its heavy tier through to frontier |
+| Apple Silicon 32–64 GB unified | tier-fast = `Qwen3.6-35B-A3B` (MoE) · tier-heavy = `Qwen3.6-27B` (dense) | **Run Ollama natively on the host** (Docker has no Apple-GPU access) — see §3, step 2; prefer the MLX builds (`qwen3.6:35b-mlx`, `qwen3.6:27b-mlx`) |
+| NVIDIA 24 GB+ (3090/4090/5090…) | tier-fast = `Qwen3.6-35B-A3B` (or lighter `Qwen3-Coder-30B-A3B`) · tier-heavy = `Qwen3.6-27B`-AWQ on vLLM | Dense 27B at Q4/AWQ is ~16–17 GB weights + KV — fits 24 GB for moderate context; enable the `gpu` profile for ~2× throughput at concurrency |
 
 > **Model selection is current as of the June–July 2026 open-weight leaderboards** (SWE-bench Verified). The prior `qwen2.5-coder:7b/32b` pair is now two generations behind — see §2.4a for the evidence, footprints, licenses, and the frontier-class open models that top the boards but do **not** fit single-box hardware.
 
@@ -83,7 +83,7 @@ No frontier keys at all? The stack still works — you just get a fully-local, z
 
 ### 2.4 Model sources
 
-- Ollama model library (GGUF, one-command pull): https://ollama.com/library — recommended starters (2026): `qwen3-coder:30b-a3b-q4_K_M` (tier-fast), `qwen3.6:27b` (tier-heavy). See §2.4a for why these replace the older `qwen2.5-coder` builds.
+- Ollama model library (GGUF, one-command pull): https://ollama.com/library — recommended starters (2026): `qwen3.6:35b-a3b-q4_K_M` (tier-fast), `qwen3.6:27b` (tier-heavy). See §2.4a for why these replace the older `qwen2.5-coder` builds.
 - Hugging Face (safetensors, for vLLM): https://huggingface.co/models — e.g. `Qwen/Qwen3.6-27B`, `Qwen/Qwen3.6-35B-A3B`, `Qwen/Qwen3-Coder-30B-A3B-Instruct`
 
 ### 2.4a Which models, and why (open-weight landscape, June–July 2026)
@@ -94,8 +94,8 @@ The tiers are just aliases (§4.1), so the model behind each is a one-line chang
 
 | Role | Model | Params (active) | License | SWE-bench Verified | Q4 footprint | Fit |
 |---|---|---|---|--:|---|---|
-| **tier-fast (default)** | Qwen3-Coder-30B-A3B | 30.5B MoE (3.3B active) | Apache-2.0 | 51.6% | ~19–22 GB | 32 GB+ RAM / 24 GB GPU; runs at ~3B-dense speed. On Ollama today. |
-| **tier-fast (upgrade)** | Qwen3.6-35B-A3B | 35B MoE (~3B active) | Apache-2.0 | **73.4%** | ~20 GB | Same footprint, far stronger — **pending a turnkey Q4 Ollama build** (HF/vLLM available now). |
+| **tier-fast (default)** | Qwen3.6-35B-A3B | 35B MoE (~3B active) | Apache-2.0 | **73.4%** | ~20 GB | 32 GB+ RAM / 24 GB GPU; runs at ~3B-dense speed. **Now on Ollama** as `qwen3.6:35b-a3b-q4_K_M` (`qwen3.6:35b-mlx` on Apple Silicon). |
+| **tier-fast (lighter alt)** | Qwen3-Coder-30B-A3B | 30.5B MoE (3.3B active) | Apache-2.0 | 51.6% | ~19–22 GB | Coding-specialized, slightly smaller — for tighter machines. On Ollama as `qwen3-coder:30b-a3b-q4_K_M`. |
 | **tier-heavy (default)** | Qwen3.6-27B (dense) | 27–28B dense | Apache-2.0 | **77.2%** | ~16–17 GB | 24 GB GPU / 64 GB Mac. Direct upgrade from `qwen2.5-coder:32b`; beats last-gen's 397B model on coding. |
 | **tier-heavy (fallback)** | Qwen3.5-27B (dense) | 27B dense | Apache-2.0 | 72.4% | ~16–17 GB | Same footprint; use if a 3.6 build misbehaves. |
 
@@ -141,7 +141,7 @@ docker compose up -d
 #    - then:        docker compose up -d --scale ollama=0
 
 # 3. Pull the local models (first pull downloads several GB)
-docker exec ollama ollama pull qwen3-coder:30b-a3b-q4_K_M   # tier-fast (MoE, ~3B active, ~19GB) — confirmed on Ollama
+docker exec ollama ollama pull qwen3.6:35b-a3b-q4_K_M       # tier-fast (MoE, ~3B active, ~20GB) — on Ollama
 docker exec ollama ollama pull qwen3.6:27b                   # tier-heavy (dense, ~17GB) — skip on small machines
 #    (native Ollama: just `ollama pull …` on the host)
 
@@ -173,7 +173,7 @@ docker compose --profile router up -d    # adds RouteLLM learned router on :6060
 
 | Alias | Serves | Role |
 |---|---|---|
-| `tier-fast` | local MoE `Qwen3-Coder-30B-A3B` (Ollama) | Default workhorse — the "90%" |
+| `tier-fast` | local MoE `Qwen3.6-35B-A3B` (Ollama) | Default workhorse — the "90%" |
 | `tier-heavy` | local dense `Qwen3.6-27B` (Ollama, optionally + vLLM under the same alias) | Harder tasks that still stay on-box |
 | `tier-frontier` | Claude Opus → GPT → Gemini (three deployments, one alias); optionally add hosted open-weight leaders (DeepSeek V4 / Kimi K2.6 / GLM-5, §2.4a) | The "10%": budget-capped, auto-failover between providers |
 | `tier-private` | local dense `Qwen3.6-27B`, **no fallback chain** | Structurally cannot leave your machine |

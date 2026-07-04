@@ -10,10 +10,10 @@ model_list:
   # ---- TIER 1: local-fast (default workhorse, ~90% of traffic) -------------
   - model_name: tier-fast
     litellm_params:
-      model: ollama_chat/qwen3-coder:30b-a3b-q4_K_M  # MoE ~3B active; swap to qwen3.6:35b-a3b for a stronger tier-fast (see docs/guide/reference/hardware-and-models.md). qwen3-coder has no MLX build, so macOS uses this same tag.
+      model: ollama_chat/qwen3.6:35b-a3b-q4_K_M  # 36B MoE, ~3B active (8 of 256 experts/token) — SWE-bench 73.4%; same fast speed as the old 30B coder, far stronger. Apple-Silicon MLX build: qwen3.6:35b-mlx (see docs/guide/reference/hardware-and-models.md).
       api_base: os.environ/OLLAMA_API_BASE
     model_info:
-      tier: local-fast
+      serving_tier: local-fast
       locality: local
 
   # Pilot candidate — Ornith-1.0-35B MoE (~3B active, MIT; DeepReinforce, see docs/guide/reference/hardware-and-models.md).
@@ -31,10 +31,10 @@ model_list:
   # ---- TIER 2: local-heavy (bigger local model; via Ollama by default) -----
   - model_name: tier-heavy
     litellm_params:
-      model: ollama_chat/qwen3.6:27b             # dense 27B, SWE-bench 77.2% (see docs/guide/reference/hardware-and-models.md). macOS/Apple Silicon: pull + use qwen3.6:27b-mlx for the MLX engine.
+      model: ollama_chat/qwen3.6:27b-mlx         # dense 27B (Apple-Silicon MLX build, pulled on this host) — SWE-bench 77.2%, the true "heavy" (all params active per token). Non-macOS: use qwen3.6:27b. (see docs/guide/reference/hardware-and-models.md)
       api_base: os.environ/OLLAMA_API_BASE
     model_info:
-      tier: local-heavy
+      serving_tier: local-heavy
       locality: local
 
   # Optional second deployment of tier-heavy on vLLM (--profile gpu).
@@ -64,7 +64,7 @@ model_list:
       rpm: 6                      # gentle rate cap for agentic bursts
       tpm: 60000
     model_info:
-      tier: frontier
+      serving_tier: frontier
       locality: cloud
 
   - model_name: tier-frontier
@@ -76,7 +76,7 @@ model_list:
       rpm: 6                      # (rationale in the tier-3 header comment above)
       tpm: 60000
     model_info:
-      tier: frontier
+      serving_tier: frontier
       locality: cloud
 
   - model_name: tier-frontier
@@ -88,17 +88,17 @@ model_list:
       rpm: 6                      # (rationale in the tier-3 header comment above)
       tpm: 60000
     model_info:
-      tier: frontier
+      serving_tier: frontier
       locality: cloud
 
   # ---- Privacy-pinned alias: can NEVER escalate off-box ---------------------
   # Point sensitive projects here; no fallback chain leaves localhost.
   - model_name: tier-private
     litellm_params:
-      model: ollama_chat/qwen3.6:27b             # dense 27B, local-only (see docs/guide/reference/hardware-and-models.md). macOS/Apple Silicon: pull + use qwen3.6:27b-mlx for the MLX engine.
+      model: ollama_chat/qwen3.6:27b-mlx         # dense 27B, Apple-Silicon MLX build (the pulled tag on this host), local-only, privacy-pinned (see docs/guide/reference/hardware-and-models.md).
       api_base: os.environ/OLLAMA_API_BASE
     model_info:
-      tier: private
+      serving_tier: private
       locality: local
 
 litellm_settings:
@@ -125,7 +125,7 @@ litellm_settings:
 
 router_settings:
   routing_strategy: simple-shuffle
-  enable_pre_call_checks: true     # enables context-window checks pre-dispatch
+  enable_pre_call_checks: false    # DISABLED: LiteLLM router bug (BerriAI/litellm#11330) — _pre_call_checks rejects unmapped local ollama tags (e.g. qwen3.6:27b-mlx) as "not mapped" even though litellm.get_model_info() DOES map them, so any no-fallback local tier (tier-private) 400s. Documented workaround. context_window_fallbacks still fires reactively on overflow.
   allowed_fails: 3                 # breaker: cooldown a deployment after 3 fails/min
   cooldown_time: 30
 

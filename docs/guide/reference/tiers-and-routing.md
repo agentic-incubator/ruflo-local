@@ -12,7 +12,7 @@ The gateway config defines four **aliases**. Clients never name real models — 
 
 | Alias | Serves | Role |
 |---|---|---|
-| `tier-fast` | local MoE `Qwen3-Coder-30B-A3B` (Ollama) | Default workhorse — the "90%" |
+| `tier-fast` | local MoE `Qwen3.6-35B-A3B` (Ollama) | Default workhorse — the "90%" |
 | `tier-heavy` | local dense `Qwen3.6-27B` (Ollama, optionally + vLLM under the same alias) | Harder tasks that still stay on-box |
 | `tier-frontier` | Claude Opus → GPT → Gemini (three deployments, one alias); optionally add hosted open-weight leaders | The "10%": budget-capped, auto-failover between providers |
 | `tier-private` | local dense `Qwen3.6-27B`, **no fallback chain** | Structurally cannot leave your machine |
