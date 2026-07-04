@@ -14,8 +14,8 @@
   },
 
   "models": {
-    "tier-fast":  { "provider": "ollama", "model": "qwen3.6:35b-a3b-q4_K_M", "locality": "local" },
-    "tier-heavy": { "provider": "ollama", "model": "qwen3.6:27b-mlx", "locality": "local" },
+    "tier-fast":  { "provider": "ollama", "model": "{{TIER_FAST_MODEL}}", "locality": "local" },
+    "tier-heavy": { "provider": "ollama", "model": "{{TIER_HEAVY_MODEL}}", "locality": "local" },
     "tier-frontier": {
       "provider": "anthropic",
       "model": "claude-opus-4-8",
@@ -25,7 +25,7 @@
     },
     "tier-private": {
       "provider": "ollama",
-      "model": "qwen3.6:27b-mlx",
+      "model": "{{TIER_PRIVATE_MODEL}}",
       "locality": "local",
       "fallbacks": []
     }

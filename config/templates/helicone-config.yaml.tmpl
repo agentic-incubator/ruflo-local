@@ -33,7 +33,7 @@ routers:
       chat:
         strategy: weighted
         models:
-          - ollama-local/qwen3.6:35b-a3b-q4_K_M   # 36B MoE, ~3B active, SWE-bench 73.4%. Local tag is selected per-hardware by scripts/render-configs.mjs.
+          - {{TIER_FAST_MODEL}}   # 36B MoE, ~3B active, SWE-bench 73.4%. Local tag is selected per-hardware by scripts/render-configs.mjs.
 
   # --- Tier 2: local-heavy ---
   tier-heavy:
@@ -41,7 +41,7 @@ routers:
       chat:
         strategy: weighted
         models:
-          - ollama-local/qwen3.6:27b-mlx   # dense 27B. Local tag is selected per-hardware by scripts/render-configs.mjs (Apple-Silicon MLX build vs plain).
+          - {{TIER_HEAVY_MODEL}}   # dense 27B. Local tag is selected per-hardware by scripts/render-configs.mjs (Apple-Silicon MLX build vs plain).
 
   # --- Tier 3: frontier (budget-capped; latency-balanced across Claude/GPT/Gemini) ---
   tier-frontier:
@@ -65,7 +65,7 @@ routers:
       chat:
         strategy: weighted
         models:
-          - ollama-local/qwen3.6:27b-mlx   # dense 27B. Local tag is selected per-hardware by scripts/render-configs.mjs (Apple-Silicon MLX build vs plain).
+          - {{TIER_PRIVATE_MODEL}}   # dense 27B. Local tag is selected per-hardware by scripts/render-configs.mjs (Apple-Silicon MLX build vs plain).
 
 # Caching is OPT-IN and left OFF so the standalone variant needs no Redis/S3.
 cache-store:
