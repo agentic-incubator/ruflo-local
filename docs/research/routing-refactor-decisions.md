@@ -104,6 +104,21 @@ not a hard upfront prerequisite.
 - Run it as the challenger; wire the `SelfEvolvingRouter` promotion gate (D4).
 - On promotion, optionally migrate to tier-schema v2 for per-request locality (D6).
 
+## Pipeline restructure (2026-07-05)
+
+The `local-first-learned-routing` autopilot pipeline is **complete at phases 0–10**. Its two
+remaining phases were **pulled into their own standalone plans** (they were independent of each other
+and of the shipped 0–10 work), parked under `.autopilot/queued/`:
+
+- **`ruvector-gateway`** (was phase 11, risk) — the Rust Path-4 sidecar. Depends only on the shipped
+  promotion-gate (phase 5) + locality (phase 7), already in-repo. See
+  [`ruvector-gateway-rationale.md`](ruvector-gateway-rationale.md).
+- **`corpus-durability`** (was phase 12) — WAL-safe `.rvf` backup + rotation. Depends only on the
+  shipped recorder (phase 3).
+
+Each is a single-phase plan (renumbered to phase 0, `depends_on: []`). Promote a queued plan to the
+active `.autopilot/pipeline.yml` to run it — one active pipeline at a time; promotion is manual.
+
 ## Deferred (explicitly not now)
 
 - **Metaharness composition** — `@metaharness/router` as an upstream cost-optimal picker

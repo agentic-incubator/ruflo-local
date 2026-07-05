@@ -2,7 +2,12 @@
 
 *Research note. Last validated: 2026-07-05.*
 
-**TL;DR** — The `ruvector-gateway` (autopilot phase 11, the RFC's **Path 4**) is **not new
+> **Delivery status (2026-07-05):** this work is now its **own standalone autopilot plan**,
+> `ruvector-gateway` — parked at `.autopilot/queued/ruvector-gateway.pipeline.yml` (was phase 11 of
+> the `local-first-learned-routing` pipeline, which is complete at phases 0–10). Its sibling split,
+> `corpus-durability` (was phase 12), is unrelated. Promote the queued plan to run it.
+
+**TL;DR** — The `ruvector-gateway` (its own `ruvector-gateway` plan, the RFC's **Path 4**) is **not new
 capability** — it is the *already-proven* Node routing loop, **compiled into one native Rust hop**.
 Today the learned-routing loop lives in ~14 JavaScript modules (`scripts/lib/*.mjs`) invoked
 *around* each request, with LiteLLM as a *separate* serving proxy. The gateway collapses **decide →
@@ -20,7 +25,7 @@ the **request path** and the offline learning stays on the **training path**.
 | Tag | Meaning |
 |-----|---------|
 | ✅ **Confirmed** | Grounded in a cited rUv source path (RuvNet brain) or a file in this repo. |
-| 🟡 **Target** | A phase-11 acceptance target (asserted by the gate when the sidecar is built), not yet measured here. |
+| 🟡 **Target** | A `ruvector-gateway`-plan acceptance target (asserted by the gate when the sidecar is built), not yet measured here. |
 
 **Sources (grounded 2026-07-05):**
 - ✅ `@ruvector/tiny-dancer`@0.1.22 — `ruvector/npm/packages/tiny-dancer/package.json`: "FastGRNN-based
@@ -33,7 +38,7 @@ the **request path** and the offline learning stays on the **training path**.
   from ruvector crates… promote the FastGRNN router + HNSW cache into a standalone `ruvector-gateway`.
   Best latency/footprint; G1–G5. 10–16 pw. Natural phase-2 evolution of Path 2." FastGRNN µs-scale
   inference + HNSW route cache = "shipped (ruvector crates)."
-- ✅ This repo — `.autopilot/pipeline.yml` phase 11 (deliverables + `< 5 ms`/`< 25 ms` targets),
+- ✅ This repo — `.autopilot/queued/ruvector-gateway.pipeline.yml` (phase 0; deliverables + `< 5 ms`/`< 25 ms` targets),
   `docker-compose.yml` (the current `:4000` gateway variants), `scripts/lib/*.mjs` (the Node loop).
 
 ---
@@ -167,7 +172,7 @@ It is a **relocation of the decision loop into native code**, not a deletion of 
 | `train-router.mjs` / `challenger.mjs` | KRR `TrainedRouter` · shadow challenger (never serves) |
 | `promotion-gate.mjs` | Champion/challenger gate: frozen held-out + significance + overfit guard + auto-rollback + receipt replay |
 | `metaharness-eval.mjs` | **Offline** comparator vs `@metaharness/router` (never a 2nd live learner) |
-| `backup-corpus.mjs` (phase 12) | WAL-safe corpus snapshot + rotation |
+| `backup-corpus.mjs` (`corpus-durability` plan) | WAL-safe corpus snapshot + rotation |
 
 **Layer 3 — External brains & memory**
 
@@ -185,7 +190,7 @@ It is a **relocation of the decision loop into native code**, not a deletion of 
 | `prometheus` / `grafana` | Spend, tier shares, fallback events, latency panels |
 | `otel-collector` | OpenTelemetry GenAI spans |
 
-**Layer 5 — The proposed sidecar** (phase 11)
+**Layer 5 — The proposed sidecar** (the `ruvector-gateway` plan)
 
 | Component | Responsibility |
 |---|---|
@@ -210,3 +215,4 @@ It is a **relocation of the decision loop into native code**, not a deletion of 
 - `docs/guide/reference/gateway-variants.md` — the `:4000` gateway options and when-to-pick-which.
 - `docs/research/routing-refactor-decisions.md` — D1–D6 decisions + the autopilot phase log.
 - `docs/research/metaharness-and-ruflo-local.md` — the two-routers caveat (never run two live learners).
+- `.autopilot/queued/ruvector-gateway.pipeline.yml` — the standalone plan that builds this (promote to run).

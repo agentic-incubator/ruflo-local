@@ -32,7 +32,7 @@ Two clear wins were taken; the rigor upgrades were scheduled as new phases; one 
 |---|---|---|---|
 | **rvf 0.2.3 / ruvector 0.2.34** | Fixes **our #641**: `dimension`/`dimensions` both accepted; MCP `rvf_create` fixed; `embed text` gains stdin/`--input-file` | recorder, RVF corpus | ✅ low-risk upgrade; validates our in-process-embedder choice |
 | **ruflo 3.22** | Memory distillation + **real failure-signal capture** (hooks record actual failures, not hardcoded `success:true`) | reflex, corpus labels | ⚠️ our corpus has no negatives → **phase 9** |
-| **ruflo 3.23** | Nightly **WAL-safe vector-DB backup** + rotation | `.ruvector/routing-corpus.rvf` | ⚠️ our corpus has no backup → **phase 12** |
+| **ruflo 3.23** | Nightly **WAL-safe vector-DB backup** + rotation | `.ruvector/routing-corpus.rvf` | ⚠️ our corpus has no backup → **`corpus-durability` plan** (was phase 12; split to `.autopilot/queued/`) |
 | **ruflo 3.24** | **Self-Learning Flywheel**: shadow-first, no-auto-serve, significance-gated, signed replayable lineage, drift canary + auto-rollback | phases 3–5 | 🎯 productized form of our loop; ours lacks significance test + signed lineage + canary + replay |
 | **ruflo 3.25.0** | **Anti-overfitting proofs**: frozen hash-pinned held-out; per-gen human-relevance deltas; clean-room replay | phase 5 gate | 🎯 directly hardens our F1–F3 gate fixes → **phase 8**. Note: the "Lattice embedder" is **inactive/vaporware** (no `@ruvector/lattice-wasm`) — do not chase |
 | **ruflo 3.25.1** | **Enforceable no-stub**: `RUFLO_REQUIRE_REAL_EMBEDDINGS=1` makes hash fallbacks throw | `train-router.mjs` | ⚠️ our trainer defaulted to a hash stub → **fixed in phase 6** |
@@ -46,7 +46,7 @@ Two clear wins were taken; the rigor upgrades were scheduled as new phases; one 
 | 3 | ruflo pin 3.21.1 → 3.25.1 | scheduled (phase 10, where the router is validated) |
 | 4 | Adopt anti-overfitting methodology in the gate | scheduled (phase 8) |
 | 5 | Capture real failure-signal as corpus negatives | scheduled (phase 9) |
-| 6 | Corpus WAL-safe backup + rotation | scheduled (phase 12) |
+| 6 | Corpus WAL-safe backup + rotation | scheduled (`corpus-durability` plan; was phase 12) |
 | 7 | Lattice / Metal LLM backend | ignored for routing (macOS Metal inference, not an embedder) |
 
 ## Pipeline re-sequencing (2026-07-05)
