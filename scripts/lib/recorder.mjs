@@ -62,6 +62,16 @@ export function validateDracoRow(row) {
  * @ruvector/ruvllm lazily via createRequire (its ESM entry ships extensionless imports);
  * if it isn't installed, embed() throws a clear message rather than leaking via a CLI.
  */
+/** Is the in-process ruvllm embedder installed? Resolves the module without loading it. */
+export function isRuvllmAvailable() {
+  try {
+    createRequire(import.meta.url).resolve("@ruvector/ruvllm");
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export function ruvllmEmbedder() {
   let llm = null;
   return async function embed(text) {

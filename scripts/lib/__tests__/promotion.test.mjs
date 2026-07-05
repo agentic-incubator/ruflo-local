@@ -6,7 +6,7 @@
 
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
-import { trainRouter, predict, hashEmbed, solveLinear, difficultyForClass } from "../train-router.mjs";
+import { trainRouter, predict, hashEmbed, solveLinear, difficultyForClass, embedderDecision, resolveEmbedder } from "../train-router.mjs";
 import { ShadowChallenger } from "../challenger.mjs";
 import { PromotionGate, qPerDollar, meanCI, replay } from "../promotion-gate.mjs";
 
@@ -16,7 +16,8 @@ const seedRows = [
   { prompt: "refactor this duplicated branch logic", task_class: "refactor" },
   { prompt: "prove this cross-file refactor preserves the invariant", task_class: "prove" },
 ];
-const model = () => trainRouter({ rows: seedRows });
+// Tests pin the deterministic hashEmbed explicitly (the library default is now the real embedder).
+const model = () => trainRouter({ rows: seedRows, embed: hashEmbed });
 /** Feed the gate `n` identical paired outcomes. */
 const feed = (gate, n, o) => { for (let i = 0; i < n; i++) gate.record(o); };
 
@@ -25,36 +26,69 @@ describe("train-router (KRR)", () => {
     const x = solveLinear([[2, 1], [1, 3]], [5, 10]); // x=1, y=3
     assert.ok(Math.abs(x[0] - 1) < 1e-9 && Math.abs(x[1] - 3) < 1e-9);
   });
-  test("should_produceCandidatesAndAlpha_ofTrainingSize", () => {
-    const m = model();
+  test("should_produceCandidatesAndAlpha_ofTrainingSize", async () => {
+    const m = await model();
     assert.equal(m.candidates.length, 3);
     assert.equal(m.alpha.length, seedRows.length);
   });
   test("should_mapHarderClassToHigherDifficulty", () => {
     assert.ok(difficultyForClass("prove") > difficultyForClass("explain"));
   });
-  test("should_failSafeToCheapestTier_when_scoreIsNonFinite", () => {
+  test("should_failSafeToCheapestTier_when_scoreIsNonFinite", async () => {
     // A corrupt model (NaN alpha) must NOT default to the most expensive off-box tier.
-    const m = model();
+    const m = await model();
     m.alpha = m.alpha.map(() => NaN);
     assert.equal(predict(m, hashEmbed("anything", m.dim)).tier, "tier-fast");
   });
 });
 
+describe("embedderDecision — no-stub norm (ruflo 3.25.1)", () => {
+  test("should_preferRealEmbedder_when_available", () => {
+    assert.equal(embedderDecision({ ruvllmAvailable: true, requireReal: true }), "ruvllm");
+  });
+  test("should_degradeToHash_when_realAbsent_andNotRequired", () => {
+    assert.equal(embedderDecision({ ruvllmAvailable: false, requireReal: false }), "hash");
+  });
+  test("should_throw_when_realRequired_butAbsent", () => {
+    assert.throws(() => embedderDecision({ ruvllmAvailable: false, requireReal: true }), /REQUIRE_REAL_EMBEDDINGS/);
+  });
+  test("should_returnAWorkingEmbedder_from_resolveEmbedder", async () => {
+    // ruvllm is installed here → resolveEmbedder yields a real async embedder (non-empty vector).
+    const embed = resolveEmbedder({});
+    const v = await embed("hello");
+    assert.ok(Array.isArray(v) && v.length > 0);
+  });
+});
+
+describe("trainRouter — async embedder path + data guard", () => {
+  test("should_trainOverAnAsyncEmbedder", async () => {
+    const m = await trainRouter({ rows: seedRows, embed: async (t, d) => hashEmbed(t, d) });
+    assert.equal(m.alpha.length, seedRows.length);
+    assert.ok(m.dim > 0);
+  });
+  test("should_throw_when_embeddingIsEmpty_ratherThanWriteNaNModel", async () => {
+    await assert.rejects(() => trainRouter({ rows: seedRows, embed: () => [] }), /non-empty|equal-length|finite/);
+  });
+  test("should_throw_when_embeddingsAreMixedLength", async () => {
+    let i = 0;
+    await assert.rejects(() => trainRouter({ rows: seedRows, embed: () => (i++ % 2 ? [1, 2] : [1, 2, 3]) }), /equal-length|finite|non-empty/);
+  });
+});
+
 describe("ShadowChallenger — shadow only, never serves, never throws", () => {
-  test("should_returnChampionTier_regardlessOfShadowPick", () => {
-    const c = new ShadowChallenger(model(), hashEmbed);
+  test("should_returnChampionTier_regardlessOfShadowPick", async () => {
+    const c = new ShadowChallenger(await model(), hashEmbed);
     assert.equal(c.observe({ prompt: "prove this hard thing", championTier: "tier-fast" }), "tier-fast");
     assert.equal(c.records[0].served, "tier-fast");
   });
-  test("should_notThrowIntoServing_when_predictFails", () => {
+  test("should_notThrowIntoServing_when_predictFails", async () => {
     // A broken embedder makes predict throw; observe must still return the champion tier.
-    const c = new ShadowChallenger(model(), () => undefined);
+    const c = new ShadowChallenger(await model(), () => undefined);
     assert.equal(c.observe({ prompt: "x", championTier: "tier-heavy" }), "tier-heavy");
   });
-  test("should_neverScorePrivateOffBox_when_pinnedPrivate", () => {
+  test("should_neverScorePrivateOffBox_when_pinnedPrivate", async () => {
     let embedCalled = false;
-    const c = new ShadowChallenger(model(), (t, d) => { embedCalled = true; return hashEmbed(t, d); });
+    const c = new ShadowChallenger(await model(), (t, d) => { embedCalled = true; return hashEmbed(t, d); });
     const served = c.observe({ prompt: "secret", championTier: "tier-private", pinnedPrivate: true });
     assert.equal(served, "tier-private");
     assert.equal(c.records[0].challengerTier, "tier-private");
