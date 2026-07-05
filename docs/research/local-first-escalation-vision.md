@@ -4,6 +4,13 @@
 > **Audience:** anyone new to this repo who wants the *why* before the *how*.
 > Companion to the technical set (`architecture-rfc.md`, `metaharness-and-ruflo-local.md`,
 > `limitations-and-mitigations.md`). This page is deliberately jargon-light.
+>
+> **Status (phases 0–10 shipped):** this page frames the *motivation*. Several "current
+> problem" statements below — the judge "on the bench", the learner "off and empty" — describe
+> the **pre-implementation** state. That escalation loop has since been built as a tested
+> reference/overlay layer (`scripts/lib/{reflex,recorder,train-router,promotion-gate}.mjs`,
+> 191 passing tests), though it is **not yet wired into the live gateway request path**. Read
+> the "problems" as the *why this repo exists*, not the *current runtime state*.
 
 ## The one-sentence vision
 
@@ -44,9 +51,11 @@ The naive versions are both bad:
 - **Always use the friend** → free and private, but you sometimes confidently ship a *wrong* answer.
 
 The sweet spot — **friend by default, tutor for the hard tail** — buys roughly
-frontier-quality at a fraction of the cost. rUv's own measured benchmark ("Barbarian &
-the Scholar", ADR-148) lifts quality ~15% → 33% by escalating **only the failures**, at
-~6× less than calling the tutor every time. That gap *is* the reason this repo exists.
+frontier-quality at a fraction of the cost. rUv **reports** that escalating **only the
+failures** (the gated-escalation work behind ADR-148) lifts quality substantially at a
+fraction of the cost. The specific figures rUv cites — roughly ~15% → 33% at ~6× less — and
+the "Barbarian & the Scholar" framing are **internal / not independently published**; treat
+them as directional motivation, not a measured guarantee. That gap *is* the reason this repo exists.
 
 ## The honest problem (why it currently feels tangled)
 

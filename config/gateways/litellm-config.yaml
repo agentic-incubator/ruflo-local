@@ -15,7 +15,7 @@ model_list:
   # ---- TIER 1: local-fast (default workhorse, ~90% of traffic) -------------
   - model_name: tier-fast
     litellm_params:
-      model: ollama_chat/qwen3.6:35b-a3b-q4_K_M  # 36B MoE, ~3B active (8 of 256 experts/token) — SWE-bench 73.4%; same fast speed as the old 30B coder, far stronger. Local tag is selected per-hardware by scripts/render-configs.mjs (see docs/guide/reference/hardware-and-models.md).
+      model: ollama_chat/qwen3.6:35b-a3b-q4_K_M  # 35B MoE, ~3B active (8 of 256 experts/token) — SWE-bench ~73.4% (vendor-reported, not an independent leaderboard); same fast speed as the old 30B coder, far stronger. Local tag is selected per-hardware by scripts/render-configs.mjs (see docs/guide/reference/hardware-and-models.md).
       api_base: os.environ/OLLAMA_API_BASE
     model_info:
       serving_tier: local-fast
@@ -36,7 +36,7 @@ model_list:
   # ---- TIER 2: local-heavy (bigger local model; via Ollama by default) -----
   - model_name: tier-heavy
     litellm_params:
-      model: ollama_chat/qwen3.6:27b-mlx         # dense 27B — SWE-bench 77.2%, the true "heavy" (all params active per token). Local tag is selected per-hardware by scripts/render-configs.mjs (Apple-Silicon MLX build vs plain; see docs/guide/reference/hardware-and-models.md).
+      model: ollama_chat/qwen3.6:27b-mlx         # dense 27B — SWE-bench ~77.2% (vendor-reported), the true "heavy" (all params active per token). Local tag is selected per-hardware by scripts/render-configs.mjs (Apple-Silicon MLX build vs plain; see docs/guide/reference/hardware-and-models.md).
       api_base: os.environ/OLLAMA_API_BASE
     model_info:
       serving_tier: local-heavy

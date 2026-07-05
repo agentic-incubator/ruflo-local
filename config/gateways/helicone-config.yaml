@@ -33,7 +33,7 @@ routers:
       chat:
         strategy: weighted
         models:
-          - ollama-local/qwen3.6:35b-a3b-q4_K_M   # 36B MoE, ~3B active, SWE-bench 73.4%. Local tag is selected per-hardware by scripts/render-configs.mjs.
+          - ollama-local/qwen3.6:35b-a3b-q4_K_M   # 35B MoE, ~3B active, SWE-bench ~73.4% (vendor-reported). Local tag is selected per-hardware by scripts/render-configs.mjs.
 
   # --- Tier 2: local-heavy ---
   tier-heavy:

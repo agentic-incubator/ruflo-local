@@ -7,7 +7,8 @@
 
 receivers:
   # LiteLLM's "otel" callback ships spans here (OTEL_EXPORTER=otlp_http,
-  # OTEL_ENDPOINT=http://otel-collector:4318 — see docker-compose.yml).
+  # OTEL_ENDPOINT=http://otel-collector:4318/v1/traces — see docker-compose.yml; the
+  # /v1/traces path is REQUIRED by LiteLLM's OTEL exporter).
   otlp:
     protocols:
       grpc:

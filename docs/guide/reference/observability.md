@@ -92,7 +92,7 @@ Fire 8–16 concurrent `tier-fast` requests; if latency collapses, that's Ollama
 
 - **Privacy by architecture** — ~90% of prompts never leave your hardware; `tier-private` makes "never" structural. Gateway message-body logging is off by default in this kit.
 - **Cost ceiling, not cost hope** — daily caps per provider that *block*, plus per-tool virtual-key budgets.
-- **Availability better than frontier-only** — two local backends + three frontier providers = five independent serving paths.
+- **Availability better than frontier-only** — two local models (plus the private one) served by a single Ollama backend, plus three independent frontier providers. Note the local models share one Ollama process, so local redundancy is at the model level, not separate serving backends.
 - **Observability parity with SaaS gateways** — tokens, spend, latency, fallbacks per model in Grafana, on your box.
 
 > [!WARNING]

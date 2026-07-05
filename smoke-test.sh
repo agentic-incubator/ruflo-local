@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 # Smoke tests for the tiered routing stack. Usage: ./smoke-test.sh
 set -uo pipefail
+# Load .env (LITELLM_MASTER_KEY, etc.) so this host-side test uses the same master
+# key the gateway was started with — without this, authed calls 401 whenever the
+# user set a custom LITELLM_MASTER_KEY in .env. Override the path with ENV_FILE=…
+if [ -f "${ENV_FILE:-.env}" ]; then set -a; . "${ENV_FILE:-.env}"; set +a; fi
 GW="${GW:-http://localhost:4000}"
 KEY="${LITELLM_MASTER_KEY:-sk-local-master}"
 hr(){ printf '\n\033[1m== %s ==\033[0m\n' "$*"; }

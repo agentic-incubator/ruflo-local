@@ -70,8 +70,13 @@ flowchart LR
 ```bash
 cp .env.example .env
 $EDITOR .env                 # set LITELLM_MASTER_KEY + any frontier keys
+make render                  # render gateway configs to your hardware (Apple Silicon→MLX, else→GGUF)
+                             #   force a variant: make render RUFLO_MODEL_VARIANT=gguf
 docker compose up -d
 ```
+
+> [!IMPORTANT]
+> **`make render` is required, not optional.** The committed gateway configs are generated from `config/templates/*.tmpl`; `tier-heavy`/`tier-private` resolve to the `-mlx` build on Apple Silicon and the plain build elsewhere. On a non-Apple-Silicon host, skipping it leaves those tiers pointing at a `-mlx` tag you never pulled. Needs Node.js.
 
 > [!TIP]
 > **Apple Silicon / native Ollama?** Docker has no Apple-GPU access — run Ollama on the host:
@@ -83,11 +88,13 @@ docker compose up -d
 ## 📥 Step 2 — Pull local models
 
 ```bash
-docker exec ollama ollama pull qwen3.6:35b-a3b-q4_K_M       # tier-fast (MoE ~3B active, ~20 GB)
-docker exec ollama ollama pull qwen3.6:27b                   # tier-heavy (dense ~17 GB) — skip on small boxes
-# native Ollama: just `ollama pull …` on the host
-# 🍎 macOS/Apple Silicon (native host): pull qwen3.6:35b-mlx for tier-fast and
-#    qwen3.6:27b-mlx for tier-heavy (Apple's MLX engine).
+# tier-fast — same GGUF tag on ALL hardware (MoE ~3B active, ~20 GB):
+docker exec ollama ollama pull qwen3.6:35b-a3b-q4_K_M
+# tier-heavy / tier-private — pull the ONE matching your render variant (Step 1):
+docker exec ollama ollama pull qwen3.6:27b-mlx    # 🍎 Apple Silicon — MLX build (~20 GB), the auto default
+docker exec ollama ollama pull qwen3.6:27b        # non-Apple-Silicon — plain GGUF (~17 GB); skip on small boxes
+# Native Ollama (macOS/Windows host, started with --scale ollama=0 → no container):
+#   drop the `docker exec ollama` prefix and just run `ollama pull …` on the host.
 ```
 
 📖 Model choices and upgrades → [Hardware & Models](reference/hardware-and-models.md).
@@ -103,6 +110,7 @@ Covers: every tier answers · forced fall-through · **privacy pin** (asserts `t
 ## 🔌 Step 4 — Point a tool at it
 
 ```bash
+set -a; source .env; set +a                       # load LITELLM_MASTER_KEY from .env into this shell
 export OPENAI_BASE_URL=http://localhost:4000/v1
 export OPENAI_API_KEY=$LITELLM_MASTER_KEY
 # …request model "tier-fast" (or tier-heavy / tier-frontier / tier-private)

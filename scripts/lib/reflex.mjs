@@ -7,6 +7,10 @@
 // the judge and escalate to frontier ONLY when the score is below the bar. Needs no
 // embedding and no learning — a pure decision over (tier, judge verdict).
 //
+// STATUS: reference/overlay code — runs in unit tests + offline/shadow tooling, NOT in the
+// live request path (live traffic is served by the gateway / LiteLLM config). See
+// docs/guide/reference/architecture-rfc.md (Path 2).
+//
 // PRIVACY PIN — FAIL CLOSED (non-negotiable). A private response must NEVER leave the
 // box. Because the FrugalGPT judge defaults to a frontier (cloud) model, *scoring* a
 // private answer would itself ship the private prompt+answer off-box. So the reflex is

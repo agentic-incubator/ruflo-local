@@ -1,6 +1,6 @@
 {
   "_meta": {
-    "purpose": "Additive router-strengthening policy for the guided router (limitations §1 signal + §2 tool-calling escalation). This file does NOT replace ruflo-tiers.json (that stays schema v1 and is consumed as the per-tier alts map); it is a human-facing REFERENCE POLICY you translate into ruflo env/config so the router scores DIFFICULTY, not length, and treats agentic tool-calling as a hard escalation independent of prompt length. See docs/guide/reference/tiers-and-routing.md (§1/§2) and docs/guide/reference/limitations-and-mitigations.md.",
+    "purpose": "Additive router-strengthening policy for the guided router (limitations §1 signal + §2 tool-calling escalation). This file does NOT replace ruflo-tiers.json (which carries its own schema_version — now 2, an additive/non-breaking change — and is consumed as the per-tier alts map); it is a human-facing REFERENCE POLICY you translate into ruflo env/config so the router scores DIFFICULTY, not length, and treats agentic tool-calling as a hard escalation independent of prompt length. See docs/guide/reference/tiers-and-routing.md (§1/§2) and docs/guide/reference/limitations-and-mitigations.md.",
     "schema_version": 1,
     "note": "Values are starting points — re-tune against your own Prometheus actuals (docs/guide/reference/observability.md). Tier names are the gateway aliases (tier-fast/tier-heavy/tier-frontier/tier-private)."
   },

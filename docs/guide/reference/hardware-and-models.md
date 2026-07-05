@@ -34,15 +34,15 @@ Pick your local ambition by memory. The default `tier-fast` is a Mixture-of-Expe
 ## 2. Which models, and why
 
 > [!IMPORTANT]
-> **Caveat up front:** these scores are largely **vendor-reported and scaffolding-dependent** (e.g. the 30B-A3B figure uses OpenHands 100-turn). Treat cross-model gaps under ~3 pp as noise, and re-verify on *your* tasks with the [quality-regression harness](observability.md#quality-regression-harness). The open-weight field moved two generations past `qwen2.5-coder` in a year.
+> **Caveat up front:** these scores are largely **vendor-reported and scaffolding-dependent** (e.g. the 30B-A3B figure uses OpenHands 100-turn). The `Qwen3.6-35B-A3B` **73.4%** and `Qwen3.6-27B` **77.2%** figures below trace to the vendor's release notes and secondary write-ups, **not an independent SWE-bench Verified leaderboard** — community agent-stacks report materially different numbers for the same models. Treat cross-model gaps under ~3 pp as noise, treat the absolute figures as *reported, not confirmed*, and re-verify on *your* tasks with the [quality-regression harness](observability.md#quality-regression-harness). The open-weight field moved two generations past `qwen2.5-coder` in a year.
 
 ### 2a. Fits local hardware — what to actually run
 
 | Role | Model | Params (active) | License | SWE-bench Verified | Q4 footprint | Fit |
 |---|---|---|---|--:|---|---|
-| **tier-fast (default)** | Qwen3.6-35B-A3B | 35B MoE (~3B active) | Apache-2.0 | **73.4%** | ~20 GB | 32 GB+ RAM / 24 GB GPU; runs at ~3B-dense speed. **Now on Ollama** as `qwen3.6:35b-a3b-q4_K_M` (or `qwen3.6:35b-mlx` on Apple Silicon). |
+| **tier-fast (default)** | Qwen3.6-35B-A3B | 35B MoE (~3B active) | Apache-2.0 | **73.4%** | ~20 GB | 32 GB+ RAM / 24 GB GPU; runs at ~3B-dense speed. **Now on Ollama** as `qwen3.6:35b-a3b-q4_K_M` — the **same GGUF tag on all hardware** (it runs on Apple-Silicon Metal; there is no separate `35b-mlx` tier-fast build). |
 | **tier-fast (lighter alt)** | Qwen3-Coder-30B-A3B | 30.5B MoE (3.3B active) | Apache-2.0 | 51.6% | ~19–22 GB | Coding-specialized, slightly smaller — for tighter machines. On Ollama as `qwen3-coder:30b-a3b-q4_K_M`. |
-| **tier-heavy (default)** | Qwen3.6-27B (dense) | 27–28B dense | Apache-2.0 | **77.2%** | ~16–17 GB | 24 GB GPU / 64 GB Mac. Beats last-gen's 397B model on coding. |
+| **tier-heavy (default)** | Qwen3.6-27B (dense) | 27–28B dense | Apache-2.0 | **77.2%** | ~16–17 GB | 24 GB GPU / 64 GB Mac. Vendor materials claim it edges last-gen's ~400B-class model on coding — **unverified**, no independent head-to-head. |
 | **tier-heavy (fallback)** | Qwen3.5-27B (dense) | 27B dense | Apache-2.0 | 72.4% | ~16–17 GB | Same footprint; use if a 3.6 build misbehaves. |
 
 ### 2b. Emerging candidate worth piloting — Ornith-1.0

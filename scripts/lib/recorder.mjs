@@ -1,6 +1,10 @@
 // =============================================================================
 // recorder.mjs — log every routing decision as a DRACO row into a ruvector RVF corpus.
 //
+// STATUS: reference/overlay code — runs in unit tests + offline/shadow tooling, NOT in the
+// live request path (live traffic is served by the gateway / LiteLLM config). See
+// docs/guide/reference/architecture-rfc.md (Path 2).
+//
 // D5 (no-backfill): from day one — while still routing per-category — every request's
 // decision is recorded WITH the prompt embedding, so the per-question learner (phases
 // 4–5) has real training data the moment its gate wants it, zero backfill.
