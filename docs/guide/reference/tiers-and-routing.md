@@ -21,6 +21,22 @@ The gateway config defines four **aliases**. Clients never name real models — 
 > **Repeating an alias creates load-balancing + failover across its deployments** — that's how `tier-frontier` spans three providers and how `tier-heavy` can span Ollama + vLLM.
 > `tier-private` appears in **no** fallback chain: that *absence* is the privacy guarantee.
 
+### 📍 Locality: a tier *default*, a request *override*
+
+Each tier has a **default locality** — where it physically runs. `tier-fast`, `tier-heavy`, and `tier-private` are **local**; `tier-frontier` is **cloud**. That default is now declared, additively, in [`config/routing/ruflo-tiers.json`](../../../config/routing/ruflo-tiers.json) as a per-tier `locality` field (`local` | `cloud`):
+
+```jsonc
+// config/routing/ruflo-tiers.json → tiers.<name>.locality
+"haiku":  { "openrouter_alt": "tier-fast",     "locality": "local" },
+"sonnet": { "openrouter_alt": "tier-heavy",    "locality": "local" },
+"opus":   { "openrouter_alt": "tier-frontier", "locality": "cloud" }
+```
+
+> [!IMPORTANT]
+> **Per-request locality is a *runtime* concern, not a schema flip.** A single request can demand local-only handling regardless of which tier would normally serve it. That override lives in the router, not this config: `route({ pinnedPrivate: true })` in [`scripts/lib/router.mjs`](../../../scripts/lib/router.mjs) resolves the request to **`tier-private`** — a local-only gateway alias with **no fallback chain** — and it is **never** budget-steered or escalated off-box (the same pin the reflex path in [`scripts/lib/reflex.mjs`](../../../scripts/lib/reflex.mjs) refuses to escalate). `tier-private` is deliberately **absent** from the `ruflo-tiers.json` alts map precisely so no edit there can ever weaken it. Tiers declare a *default* locality; a request declares its *actual* one.
+
+**Forward-compatible, non-breaking.** The `locality` field and the `_meta.schema_version: 2` bump are **additive**: ruflo and LiteLLM read only the `tiers` map shape (which is unchanged) and ignore `_meta` plus any extra per-tier keys, so both v1 and v2 files are consumed identically. The invariant check accepts `schema_version ∈ {1, 2}` — there is no breaking migration. A *future* full v2 (materialized only when a per-question learned router is actually promoted — see [Champion/challenger promotion](limitations-and-mitigations.md)) would extend this same shape to carry per-request locality *directives* in the routing decision; this file only **declares the capability and its defaults** today, so nothing downstream has to change until that promotion fires.
+
 ---
 
 ## 🪜 The fall-through ladder
