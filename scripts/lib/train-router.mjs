@@ -19,6 +19,8 @@
 
 import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { dirname } from "node:path";
+import { str } from "./config.mjs";
+import { ruvllmEmbedder, isRuvllmAvailable } from "./recorder.mjs";
 
 /** Deterministic 64-dim feature-hash embedding — reproducible, no native deps. */
 export function hashEmbed(text, dim = 64) {
@@ -84,12 +86,57 @@ export const DEFAULT_CANDIDATES = [
 ];
 
 /** Build the portable TrainedRouter model from a seed corpus. */
-export function trainRouter({ rows, embed = hashEmbed, candidates = DEFAULT_CANDIDATES, dim = 64, gamma, lambda = 0.1, qualityBar = 0.7 } = {}) {
-  const support = rows.map((r) => embed(r.prompt, dim));
+export async function trainRouter({ rows, embed, candidates = DEFAULT_CANDIDATES, dim = 64, gamma, lambda = 0.1, qualityBar = 0.7, env = process.env } = {}) {
+  // No-stub at the LIBRARY boundary: the DEFAULT embedder is the real-embedder resolver
+  // (which honors RUFLO_REQUIRE_REAL_EMBEDDINGS), not a silent hash. Tests pass hashEmbed
+  // explicitly for determinism. embed may be async — await it and derive the true dim.
+  const embedder = embed ?? resolveEmbedder(env);
+  const support = await Promise.all(rows.map((r) => embedder(r.prompt, dim)));
+  // Guard the training data: empty/mixed-length/non-finite embeddings would NaN the KRR
+  // (dim=0 → gamma=Infinity → NaN alpha) and silently write a garbage model to disk.
+  const actualDim = support[0]?.length ?? 0;
+  if (rows.length && (actualDim === 0 || support.some((v) => !Array.isArray(v) || v.length !== actualDim || !v.every(Number.isFinite)))) {
+    throw new Error("train-router: embeddings must be non-empty, equal-length, finite vectors");
+  }
   const y = rows.map((r) => difficultyForClass(r.task_class));
-  const g = gamma ?? 1 / dim;
+  const g = gamma ?? 1 / actualDim;
   const alpha = rows.length ? trainKRR(support, y, { gamma: g, lambda }) : [];
-  return { kernel: "rbf", gamma: g, lambda, dim, qualityBar, candidates, support, alpha, meta: { n: rows.length, seededAt: "train-router" } };
+  return { kernel: "rbf", gamma: g, lambda, dim: actualDim, qualityBar, candidates, support, alpha, meta: { n: rows.length, seededAt: "train-router" } };
+}
+
+/**
+ * No-stub embedder policy (ruflo 3.25.1 norm): a real in-process embedder is the DEFAULT;
+ * a hash fallback is a silent last resort ONLY when a real one is unavailable AND the caller
+ * hasn't demanded real embeddings. Pure so it's unit-testable without toggling native deps.
+ * @returns {"ruvllm"|"hash"} · throws when requireReal and no real embedder is available.
+ */
+export function embedderDecision({ ruvllmAvailable, requireReal }) {
+  if (ruvllmAvailable) return "ruvllm";
+  if (requireReal) {
+    throw new Error(
+      "train-router: RUFLO_REQUIRE_REAL_EMBEDDINGS=1 but no real embedder is available — " +
+        "install @ruvector/ruvllm or inject an embedder; refusing to train on semantically-meaningless hash vectors."
+    );
+  }
+  return "hash";
+}
+
+/**
+ * Resolve the runtime-DEFAULT embedder: real in-process ruvllm when present, else hashEmbed —
+ * unless RUFLO_REQUIRE_REAL_EMBEDDINGS=1, in which case the hash last-resort THROWS.
+ */
+export function resolveEmbedder(env = process.env) {
+  const requireReal = str("RUFLO_REQUIRE_REAL_EMBEDDINGS", "", env) === "1";
+  // Decide ONCE, up front, on module PRESENCE — not per-call in a catch. This throws now
+  // (requireReal && absent) rather than mid-training, and crucially it does NOT swallow a
+  // RUNTIME embed failure into a silent hash downgrade (mirrors recorder's absent-vs-operational
+  // split): when ruvllm is present, its runtime errors propagate.
+  const mode = embedderDecision({ ruvllmAvailable: isRuvllmAvailable(), requireReal });
+  if (mode === "ruvllm") {
+    const ruv = ruvllmEmbedder();
+    return (text) => ruv(text);
+  }
+  return async (text, dim) => hashEmbed(text, dim ?? 64);
 }
 
 /** Predict difficulty for a new embedding, then the cheapest candidate that covers it. */
@@ -123,7 +170,9 @@ export async function main(argv = process.argv.slice(2)) {
   }
   if (!seed || !out) { process.stderr.write("train-router: --seed and --out are required\n"); return 2; }
   const rows = parseJsonl(readFileSync(seed, "utf8"));
-  const model = trainRouter({ rows });
+  // trainRouter's default embedder is now the real-embedder resolver (no-stub); it
+  // degrades to hash or throws per RUFLO_REQUIRE_REAL_EMBEDDINGS.
+  const model = await trainRouter({ rows });
   mkdirSync(dirname(out), { recursive: true });
   writeFileSync(out, JSON.stringify(model, null, 2));
   process.stdout.write(`train-router: trained on ${rows.length} rows → ${out} (candidates=${model.candidates.length}, alpha=${model.alpha.length})\n`);
