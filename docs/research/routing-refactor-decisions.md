@@ -119,3 +119,31 @@ not a hard upfront prerequisite.
 - **Phase 2:** replay the logged corpus offline → challenger's quality-per-dollar vs champion
   vs the per-question oracle; confirm the gate promotes only when the margin + sample
   thresholds are met, and auto-rolls-back on an injected regression.
+
+## Decision log — autopilot Phase 10 (metaharness offline eval + ruflo 3.25.1)
+
+*Recorded 2026-07-05. Autopilot pipeline `local-first-learned-routing`, phase 10 (risk).*
+
+**ruflo pin bumped 3.21.1 → 3.25.1** (the current published `latest`), validated against the full
+gate. Supporting components refreshed to latest and re-tested: `@ruvector/ruvllm` `^0.2.0 → ^2.6.0`
+(a major jump — the recorder's in-process embedder still yields a real 768-dim vector, all tests
+green), `@ruvector/rvf` `^0.2.3` (already current), and `@metaharness/router` `^0.3.2` added as an
+optional dep for the offline comparator.
+
+**Metaharness vs ruflo — offline, three-way (`scripts/lib/metaharness-eval.mjs` → `.autopilot/reports/metaharness-vs-ruflo.json`).**
+Grounded in real source (`agent-harness-generator/packages/router` v0.3.2): `@metaharness/router` is
+the productized DRACO Phase-2 cost-optimal picker (`Router.fromExamples` → `route`). We ran it
+head-to-head against ruflo's KRR router and a per-question oracle on a held-out split, seeded from
+`tests/quality-prompts.jsonl` (the live `.rvf` corpus is not yet materialized) with real ruvllm
+embeddings and a synthetic-but-principled ground truth (`difficultyForClass`).
+
+- **Result:** both routers hit quality 1.0; metaharness **led on q/$** (14.67 vs 6.67, Δ8.0) by
+  correctly taking cheaper adequate tiers — a genuine, if synthetic, DRACO-style cost win.
+- **Recommendation: KEEP ruflo (do NOT adopt yet).** Adoption would *disable* ruflo's learner (to
+  avoid two-brain label blur), and a point-estimate win on a **synthetic, n_heldout=5 seed corpus**
+  is insufficient — the DRACO n≈20 ceiling means a tie/insufficient-evidence outcome is the honest
+  one. The harness's `recommend()` gates adoption on **sufficient + real** evidence, so it correctly
+  declines here while transparently recording `metaharness_led_on_point_estimate: true`.
+- **Re-open condition:** re-run against a materialized `.ruvector` routing corpus (real telemetry,
+  n ≫ 20). If metaharness still wins there, adopt it and disable ruflo's learner per the
+  two-learners caveat in `metaharness-and-ruflo-local.md` §5. Never run both live at once.
