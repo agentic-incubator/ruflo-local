@@ -16,6 +16,10 @@ import {
   RoutingRecorder,
   jsonlStore,
   DRACO_FIELDS,
+  isNegativeOutcome,
+  outcomeFromReflex,
+  recorderEmbedderDecision,
+  resolveRecorderEmbedder,
 } from "../recorder.mjs";
 
 let RVF_OK = false;
@@ -28,11 +32,11 @@ function fakeEmbed(text) {
   return Array.from({ length: DIM }, (_, i) => parseInt(h.slice(i * 2, i * 2 + 2), 16) / 255 + 0.001);
 }
 const decision = (prompt, over = {}) => ({
-  prompt, category: "code", tier: "tier-fast", judge_score: 0.8, cost: 0, latency: 5.1, escalated: false, ...over,
+  prompt, category: "code", tier: "tier-fast", judge_score: 0.8, cost: 0, latency: 5.1, escalated: false, success: true, ...over,
 });
 
 describe("validateDracoRow (present + well-typed)", () => {
-  const good = { prompt_hash: promptHash("p"), embedding: [0.1], category: "code", tier: "tier-fast", judge_score: 0.5, cost: 0, latency: 1, escalated: false };
+  const good = { prompt_hash: promptHash("p"), embedding: [0.1], category: "code", tier: "tier-fast", judge_score: 0.5, cost: 0, latency: 1, escalated: false, success: true };
   test("should_accept_when_allFieldsWellTyped", () => {
     assert.equal(validateDracoRow(good).ok, true);
   });
@@ -44,8 +48,44 @@ describe("validateDracoRow (present + well-typed)", () => {
     assert.equal(validateDracoRow({ ...good, latency: NaN }).ok, false);        // NaN
     assert.equal(validateDracoRow({ ...good, prompt_hash: "nothex" }).ok, false); // bad hash
   });
+  test("should_reject_when_successMissingOrNotBoolean", () => {
+    const { success: _drop, ...noSuccess } = good;
+    assert.equal(validateDracoRow(noSuccess).ok, false);                         // hardcoded-true bug guard
+    assert.equal(validateDracoRow({ ...good, success: "true" }).ok, false);      // not boolean
+  });
+  test("should_accept_aNegativeOutcome_successFalse", () => {
+    assert.equal(validateDracoRow({ ...good, success: false }).ok, true);
+  });
   test("should_allow_nullJudgeScore", () => {
     assert.equal(validateDracoRow({ ...good, judge_score: null }).ok, true);
+  });
+});
+
+describe("negative capture (ruflo 3.22 — success is the REAL outcome)", () => {
+  test("should_classifyFailureAsNegative_andSuccessAsNotNegative", () => {
+    assert.equal(isNegativeOutcome({ success: false }), true);
+    assert.equal(isNegativeOutcome({ success: true }), false);
+  });
+  test("should_deriveNegative_fromAReflexEscalation", () => {
+    // A reflex escalation means the LOCAL answer was inadequate → a negative for that decision.
+    assert.deepEqual(outcomeFromReflex({ escalated: true }), { escalated: true, success: false });
+    assert.deepEqual(outcomeFromReflex({ escalated: false }), { escalated: false, success: true });
+  });
+});
+
+describe("real-embedder default (RUFLO_REQUIRE_REAL_EMBEDDINGS honored end-to-end)", () => {
+  test("should_chooseRuvllm_when_available_regardlessOfFlag", () => {
+    assert.equal(recorderEmbedderDecision({ ruvllmAvailable: true, requireReal: false }), "ruvllm");
+    assert.equal(recorderEmbedderDecision({ ruvllmAvailable: true, requireReal: true }), "ruvllm");
+  });
+  test("should_throwNeverStub_when_noRealEmbedder", () => {
+    assert.throws(() => recorderEmbedderDecision({ ruvllmAvailable: false, requireReal: false }), /never writes stub/);
+    assert.throws(() => recorderEmbedderDecision({ ruvllmAvailable: false, requireReal: true }), /REQUIRE_REAL_EMBEDDINGS/);
+  });
+  test("should_resolveARealEmbedder_here_where_ruvllmInstalled", async () => {
+    const embed = resolveRecorderEmbedder({});
+    const v = await embed("hello");
+    assert.ok(Array.isArray(v) && v.length > 0); // a real, non-empty vector
   });
 });
 
@@ -126,6 +166,27 @@ describe("RoutingRecorder — real .rvf store", { skip: RVF_OK ? false : "@ruvec
     const dir = mkdtempSync(join(tmpdir(), "rec-dim-"));
     const rec = await RoutingRecorder.open({ corpusPath: join(dir, "c.rvf"), dimension: DIM, embed: () => [1, 2, 3] }); // 3 != 8
     await assert.rejects(() => rec.record(decision("x")), /embedding dim 3 != store dim 8/);
+    await rec.close();
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  test("should_recordAFailedDecisionAsANegative", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "rec-neg-"));
+    const rec = await RoutingRecorder.open({ corpusPath: join(dir, "c.rvf"), dimension: DIM, embed: fakeEmbed });
+    const row = await rec.record(decision("a query the local tier botched", { escalated: true, success: false }));
+    assert.equal(validateDracoRow(row).ok, true);
+    assert.equal(isNegativeOutcome(row), true);   // the corpus now carries a real negative
+    assert.equal(await rec.count(), 1);
+    await rec.close();
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  test("should_refuseToRecord_when_successOutcomeOmitted", async () => {
+    // No hardcoded success:true — a decision with no real outcome is rejected, not silently accepted.
+    const dir = mkdtempSync(join(tmpdir(), "rec-nosucc-"));
+    const rec = await RoutingRecorder.open({ corpusPath: join(dir, "c.rvf"), dimension: DIM, embed: fakeEmbed });
+    const { success: _drop, ...noOutcome } = decision("x");
+    await assert.rejects(() => rec.record(noOutcome), /never hardcode success:true/);
     await rec.close();
     rmSync(dir, { recursive: true, force: true });
   });

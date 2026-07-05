@@ -5,6 +5,18 @@
 // decision is recorded WITH the prompt embedding, so the per-question learner (phases
 // 4–5) has real training data the moment its gate wants it, zero backfill.
 //
+// D11 / phase 9 (ruflo 3.22): every row carries the REAL outcome (`success` true OR false).
+// Upstream ruflo used to hardcode PostToolUse success:true, hiding every failure — so the
+// learner/oracle only ever saw accepted answers and could not learn from mistakes. Here
+// `success` is REQUIRED and never defaulted to true: a failure is recorded as a corpus
+// NEGATIVE (success:false), including a reflex escalation (the local tier's answer was judged
+// inadequate). Negatives carry the SAME privacy guarantees as positives — prompt_hash +
+// embedding only, never raw text.
+//
+// EMBEDDINGS (phase 6/9): the default embedder is a REAL in-process ruvllm model; the recorder
+// NEVER writes stub/hash vectors (they are meaningless to the per-question learner), and it
+// honors RUFLO_REQUIRE_REAL_EMBEDDINGS end-to-end via resolveRecorderEmbedder().
+//
 // Storage is a REAL ruvector `.rvf` store via the @ruvector/rvf SDK (HNSW-indexed,
 // crash-safe, single-writer) — NOT an ad-hoc JSON file. When the SDK is absent it
 // degrades to a portable JSONL corpus (same DRACO rows). `kind` says which path is live.
@@ -30,7 +42,7 @@ import { createRequire } from "node:module";
 import { str } from "./config.mjs";
 
 /** DRACO row fields recorded per decision (the embedding rides as the vector). */
-export const DRACO_FIELDS = ["prompt_hash", "category", "tier", "judge_score", "cost", "latency", "escalated"];
+export const DRACO_FIELDS = ["prompt_hash", "category", "tier", "judge_score", "cost", "latency", "escalated", "success"];
 
 /** sha256 hex of the prompt — the stored id, never the raw text. */
 export function promptHash(prompt) {
@@ -51,9 +63,27 @@ export function validateDracoRow(row) {
   if (!isNum(row.cost) || row.cost < 0) errors.push("cost must be a number >= 0");
   if (!isNum(row.latency) || row.latency < 0) errors.push("latency must be a number >= 0");
   if (typeof row.escalated !== "boolean") errors.push("escalated must be a boolean");
+  if (typeof row.success !== "boolean") errors.push("success must be a boolean (the REAL outcome — never hardcode success:true; a failure is a corpus negative)");
   if (!Array.isArray(row.embedding) || row.embedding.length === 0) errors.push("embedding must be a non-empty array");
   else if (!row.embedding.every(isNum)) errors.push("embedding must contain only finite numbers");
   return { ok: errors.length === 0, errors };
+}
+
+/** A corpus NEGATIVE = a decision whose REAL outcome was a failure (success:false). ruflo 3.22
+ *  fixed the old hardcoded success:true that hid every failure from the learner/oracle. */
+export function isNegativeOutcome(row) {
+  return row?.success === false;
+}
+
+/**
+ * Map a reflex() result to the recordable outcome fields. An escalation means the LOCAL tier's
+ * answer was judged inadequate → a NEGATIVE for that local decision (success:false), even if the
+ * finally-served frontier answer is fine. This is exactly the negative signal the learner needs.
+ * Privacy: this reads only the reflex verdict flags, never the raw prompt/answer.
+ */
+export function outcomeFromReflex(reflexResult) {
+  const escalated = !!reflexResult?.escalated;
+  return { escalated, success: !escalated };
 }
 
 /**
@@ -91,6 +121,31 @@ export function ruvllmEmbedder() {
     const out = await llm.embed(String(text));
     return Array.isArray(out) ? out : out.embedding ?? out.vector ?? out.data;
   };
+}
+
+/**
+ * Pure embedder decision for the RECORDER (no-stub ALWAYS). Unlike train-router's embedderDecision
+ * — which may fall back to hashEmbed when RUFLO_REQUIRE_REAL_EMBEDDINGS is unset — the corpus must
+ * never carry stub vectors, so this returns "ruvllm" or THROWS. The flag only sharpens the message.
+ * @returns {"ruvllm"} · throws when no real embedder is available.
+ */
+export function recorderEmbedderDecision({ ruvllmAvailable, requireReal }) {
+  if (ruvllmAvailable) return "ruvllm";
+  throw new Error(
+    `recorder: no real embedder (@ruvector/ruvllm absent)${requireReal ? " and RUFLO_REQUIRE_REAL_EMBEDDINGS=1" : ""} — ` +
+      "inject `embed` into RoutingRecorder.open() or install @ruvector/ruvllm. The recorder never writes stub embeddings (meaningless to the per-question learner)."
+  );
+}
+
+/**
+ * Resolve the recorder's runtime-DEFAULT embedder: the real in-process ruvllm model when present,
+ * else THROW (honoring RUFLO_REQUIRE_REAL_EMBEDDINGS end-to-end). An explicitly injected `embed`
+ * bypasses this entirely (tests use a deterministic fake).
+ */
+export function resolveRecorderEmbedder(env = process.env) {
+  const requireReal = str("RUFLO_REQUIRE_REAL_EMBEDDINGS", "", env) === "1";
+  recorderEmbedderDecision({ ruvllmAvailable: isRuvllmAvailable(), requireReal }); // throws if none
+  return ruvllmEmbedder();
 }
 
 // ── Store backends (exported for direct testing) ─────────────────────────────
@@ -170,9 +225,12 @@ export class RoutingRecorder {
     this.#dimension = dimension;
   }
 
-  static async open({ corpusPath, dimension = 768, embed = ruvllmEmbedder(), env = process.env } = {}) {
+  static async open({ corpusPath, dimension = 768, embed, env = process.env } = {}) {
+    // Default to the REAL in-process embedder (throws if absent, honoring RUFLO_REQUIRE_REAL_EMBEDDINGS);
+    // an explicitly injected `embed` bypasses resolution entirely. Resolved lazily so injection wins.
+    const embedder = embed ?? resolveRecorderEmbedder(env);
     const store = await openCorpus({ corpusPath, dimension, env });
-    return new RoutingRecorder(store, embed, dimension);
+    return new RoutingRecorder(store, embedder, dimension);
   }
 
   get kind() { return this.#store.kind; }
@@ -183,13 +241,18 @@ export class RoutingRecorder {
    * never stored/logged) plus routing metadata. Returns the validated DRACO row.
    */
   async record(decision) {
-    const { prompt, category, tier, judge_score, cost, latency, escalated } = decision;
+    const { prompt, category, tier, judge_score, cost, latency, escalated, success } = decision;
+    // The REAL outcome must be supplied — NEVER hardcode success:true (ruflo 3.22). A missing
+    // outcome is a bug in the caller, not a "success"; refuse it so failures can't be silently lost.
+    if (typeof success !== "boolean") {
+      throw new Error("recorder: `success` (the real pass/fail outcome) must be provided as a boolean — never hardcode success:true (ruflo 3.22); use outcomeFromReflex() or pass the actual result.");
+    }
     const embedding = await this.#embed(prompt);
     if (!Array.isArray(embedding) || embedding.length !== this.#dimension) {
       throw new Error(`recorder: embedding dim ${embedding?.length} != store dim ${this.#dimension} (set dimension to match your embedder)`);
     }
     const prompt_hash = promptHash(prompt);
-    const row = { prompt_hash, embedding, category, tier, judge_score, cost, latency, escalated };
+    const row = { prompt_hash, embedding, category, tier, judge_score, cost, latency, escalated, success };
 
     const { ok, errors } = validateDracoRow(row);
     if (!ok) throw new Error(`recorder: invalid DRACO row — ${errors.join("; ")}`);
