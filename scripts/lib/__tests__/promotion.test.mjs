@@ -6,9 +6,28 @@
 
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { trainRouter, predict, hashEmbed, solveLinear, difficultyForClass, embedderDecision, resolveEmbedder } from "../train-router.mjs";
 import { ShadowChallenger } from "../challenger.mjs";
-import { PromotionGate, qPerDollar, meanCI, replay } from "../promotion-gate.mjs";
+import { PromotionGate, qPerDollar, meanCI, replay, verifyFrozenSet, frozenHash, pairedSignificance, heldOutRegression } from "../promotion-gate.mjs";
+import { replayPromotion } from "../replay-promotion.mjs";
+
+// ── Phase 8 fixtures: the frozen held-out set + id-matched challenger outcomes. ──
+const frozenPath = fileURLToPath(new URL("../../../tests/promotion-eval-frozen-v1.json", import.meta.url));
+const loadFrozen = () => JSON.parse(readFileSync(frozenPath, "utf8"));
+const FROZEN = loadFrozen();
+const clip = (x) => Math.max(0, Math.min(1, x));
+// A GENUINE win: quality +0.04 AND human relevance +0.03 across every case, cheaper.
+const winChallenger = FROZEN.cases.map((c) => ({ id: c.id, quality: clip(c.champion.quality + 0.04), cost: 1.0, humanRelevance: clip(c.champion.humanRelevance + 0.03) }));
+// OVERFIT: auto-quality +0.05 but human relevance FLAT — the self-metric-up/human-flat signature.
+const overfitChallenger = FROZEN.cases.map((c) => ({ id: c.id, quality: clip(c.champion.quality + 0.05), cost: 1.0, humanRelevance: c.champion.humanRelevance }));
+// REGRESSION: challenger clearly worse on the frozen set.
+const regressChallenger = FROZEN.cases.map((c) => ({ id: c.id, quality: clip(c.champion.quality - 0.10), cost: 1.0, humanRelevance: clip(c.champion.humanRelevance - 0.10) }));
+// A win too small to be significant (a hair above champion).
+const noiseChallenger = FROZEN.cases.map((c) => ({ id: c.id, quality: clip(c.champion.quality + 0.002), cost: 1.0, humanRelevance: clip(c.champion.humanRelevance + 0.002) }));
+// A rolling-window feed that makes the F1-F3 gate promote, so held-out behavior is isolated.
+const feedWin = (g) => { for (let i = 0; i < 40; i++) g.record({ championQuality: 0.80, championCost: 2.0, challengerQuality: 0.85, challengerCost: 1.0 }); };
 
 const seedRows = [
   { prompt: "fix this null bug in python", task_class: "bugfix" },
@@ -173,5 +192,178 @@ describe("promotion gate — the F1 fix and the discipline", () => {
     feed(g, 25, { championQuality: 0.80, championCost: 2, challengerQuality: 0.85, challengerCost: 1 });
     g.evaluate();
     assert.equal(g.checkRollback().rollback, false);
+  });
+});
+
+describe("Phase 8 — frozen held-out set (tamper-evident)", () => {
+  test("should_verifyTheCommittedFrozenSet", () => {
+    assert.equal(verifyFrozenSet(loadFrozen()), true);
+  });
+  test("should_haveAStableCanonicalHash_independentOfKeyOrder", () => {
+    const a = frozenHash(FROZEN.cases);
+    const reordered = FROZEN.cases.map((c) => ({ champion: c.champion, task_class: c.task_class, prompt_hash: c.prompt_hash, id: c.id }));
+    assert.equal(frozenHash(reordered), a); // key order must not change the pin
+  });
+  test("should_throw_when_aFrozenCaseIsTampered", () => {
+    const s = loadFrozen();
+    s.cases[0].champion.quality = 0.01; // edit the yardstick to fake a challenger "win"
+    assert.throws(() => verifyFrozenSet(s), /tamper check FAILED/);
+  });
+  test("should_throw_when_frozenSetMalformed", () => {
+    assert.throws(() => verifyFrozenSet({ _meta: { sha256: "x" } }), /malformed/);
+  });
+});
+
+describe("Phase 8 — significance test", () => {
+  test("should_flagAClearPairedWinAsSignificant", () => {
+    assert.equal(pairedSignificance(Array(12).fill(0.04), { seFloor: 0.01 }).significant, true);
+  });
+  test("should_notFlagAHairAboveZeroAsSignificant", () => {
+    assert.equal(pairedSignificance(Array(12).fill(0.002), { seFloor: 0.01 }).significant, false);
+  });
+  test("should_notFlagANegativeMeanAsSignificant", () => {
+    assert.equal(pairedSignificance(Array(12).fill(-0.05), { seFloor: 0.01 }).significant, false);
+  });
+});
+
+describe("Phase 8 — held-out regression + overfitting guard", () => {
+  test("should_reportAGenuineWin_asSignificant_notRegressed_notOverfit", () => {
+    const h = heldOutRegression({ frozen: loadFrozen(), challenger: winChallenger });
+    assert.equal(h.significant, true);
+    assert.equal(h.regressed, false);
+    assert.equal(h.overfit, false);
+  });
+  test("should_flagOverfit_when_autoQualityUpButHumanRelevanceFlat", () => {
+    const h = heldOutRegression({ frozen: loadFrozen(), challenger: overfitChallenger });
+    assert.equal(h.overfit, true);
+    assert.ok(h.meanQDiff > 0 && h.meanHumanDiff < 0.01);
+  });
+  test("should_flagRegression_when_challengerWorseOnFrozenSet", () => {
+    const h = heldOutRegression({ frozen: loadFrozen(), challenger: regressChallenger });
+    assert.equal(h.regressed, true);
+  });
+});
+
+describe("Phase 8 — evaluateWithHeldOut composes F1-F3 with the frozen gate", () => {
+  test("should_promote_when_rollingAndFrozenBothPass", () => {
+    const g = new PromotionGate({ minSamples: 20 });
+    feedWin(g);
+    const d = g.evaluateWithHeldOut({ frozen: loadFrozen(), challengerHeldOut: winChallenger });
+    assert.equal(d.promote, true);
+    assert.equal(g.promoted, true);
+  });
+  test("should_BLOCK_andVetoPromotedFlag_onOverfit", () => {
+    const g = new PromotionGate({ minSamples: 20 });
+    feedWin(g); // rolling gate WOULD promote; the overfit guard must veto it
+    const d = g.evaluateWithHeldOut({ frozen: loadFrozen(), challengerHeldOut: overfitChallenger });
+    assert.equal(d.promote, false);
+    assert.equal(d.heldOut.overfit, true);
+    assert.match(d.reason, /OVERFIT/);
+    assert.equal(g.promoted, false); // the held-out block undoes evaluate()'s side effect
+  });
+  test("should_BLOCK_onFrozenHeldOutRegression", () => {
+    const g = new PromotionGate({ minSamples: 20 });
+    feedWin(g);
+    const d = g.evaluateWithHeldOut({ frozen: loadFrozen(), challengerHeldOut: regressChallenger });
+    assert.equal(d.promote, false);
+    assert.match(d.reason, /regression/);
+  });
+  test("should_BLOCK_when_heldOutWinNotSignificant", () => {
+    const g = new PromotionGate({ minSamples: 20 });
+    feedWin(g);
+    const d = g.evaluateWithHeldOut({ frozen: loadFrozen(), challengerHeldOut: noiseChallenger });
+    assert.equal(d.promote, false);
+    assert.match(d.reason, /significant/);
+  });
+});
+
+describe("Phase 8 — clean-room receipt replay (offline, no trusting our logs)", () => {
+  const genuineReceipt = () => ({
+    gate_config: { minSamples: 20 },
+    rolling_samples: Array.from({ length: 40 }, () => ({ championQuality: 0.80, championCost: 2.0, challengerQuality: 0.85, challengerCost: 1.0 })),
+    held_out: winChallenger,
+    frozen_sha256: FROZEN._meta.sha256,
+    result: { promote: true },
+  });
+
+  test("should_replayAGenuinePromotion_offline_withFetchTrapped", () => {
+    const savedFetch = globalThis.fetch;
+    globalThis.fetch = () => { throw new Error("network access during replay is forbidden"); };
+    try {
+      const out = replayPromotion({ receipt: genuineReceipt(), frozen: loadFrozen() });
+      assert.equal(out.accepted, true);
+      assert.equal(out.recomputed.promote, true);
+      assert.deepEqual(out.mismatches, []);
+    } finally {
+      globalThis.fetch = savedFetch;
+    }
+  });
+
+  test("should_rejectAReceipt_whose_frozenHash_isWrong", () => {
+    const r = genuineReceipt();
+    r.frozen_sha256 = "deadbeef";
+    const out = replayPromotion({ receipt: r, frozen: loadFrozen() });
+    assert.equal(out.accepted, false);
+    assert.match(out.mismatches.join(";"), /frozen hash mismatch/);
+  });
+
+  test("should_rejectADoctoredReceipt_thatClaimsPromoteButRecomputesNo", () => {
+    const r = genuineReceipt();
+    r.held_out = regressChallenger; // the REAL decision on these inputs is NO...
+    // ...but result still lies "promote: true". Replay recomputes and catches the mismatch.
+    const out = replayPromotion({ receipt: r, frozen: loadFrozen() });
+    assert.equal(out.accepted, false);
+    assert.match(out.mismatches.join(";"), /decision mismatch/);
+  });
+});
+
+describe("Phase 8 — hardening from adversarial review", () => {
+  // Finding 1 (HIGH): reporting only a winning SUBSET of the frozen set must not promote.
+  test("should_BLOCK_when_challengerCoversOnlyASubsetOfTheFrozenSet", () => {
+    const g = new PromotionGate({ minSamples: 20 });
+    feedWin(g);
+    const d = g.evaluateWithHeldOut({ frozen: loadFrozen(), challengerHeldOut: winChallenger.slice(0, 1) });
+    assert.equal(d.promote, false);
+    assert.match(d.reason, /coverage/);
+    assert.equal(g.promoted, false);
+  });
+
+  // Finding 2 (HIGH): a tampered yardstick must THROW and fail closed — never leave promoted=true.
+  test("should_failClosed_flippingPromotedBackToFalse_when_frozenSetTamperedThrows", () => {
+    const g = new PromotionGate({ minSamples: 20 });
+    feedWin(g);
+    assert.equal(g.evaluateWithHeldOut({ frozen: loadFrozen(), challengerHeldOut: winChallenger }).promote, true);
+    assert.equal(g.promoted, true); // legitimately promoted
+    const tampered = loadFrozen();
+    tampered.cases[0].champion.quality = 0.01; // hash no longer matches
+    assert.throws(() => g.evaluateWithHeldOut({ frozen: tampered, challengerHeldOut: winChallenger }), /tamper check FAILED/);
+    assert.equal(g.promoted, false); // the throw vetoed the prior promotion
+  });
+
+  // Finding 3 (MEDIUM): the old blind band — a small SIGNIFICANT auto-gain with flat human relevance.
+  test("should_flagOverfit_inTheOldBlindBand_smallSignificantGain_flatHuman", () => {
+    const g = new PromotionGate({ minSamples: 20 });
+    feedWin(g);
+    const band = FROZEN.cases.map((c) => ({ id: c.id, quality: clip(c.champion.quality + 0.02), cost: 1.0, humanRelevance: c.champion.humanRelevance }));
+    const d = g.evaluateWithHeldOut({ frozen: loadFrozen(), challengerHeldOut: band });
+    assert.equal(d.heldOut.overfit, true);
+    assert.equal(d.promote, false);
+  });
+
+  // Finding 4 (MEDIUM): a self-consistent frozen set that is off the OUT-OF-BAND pin is rejected.
+  test("should_rejectFrozenSet_selfConsistentButOffTheOutOfBandPin", () => {
+    const forged = loadFrozen();
+    forged.cases[0].champion.quality = 0.01;
+    forged._meta.sha256 = frozenHash(forged.cases); // attacker recomputes → internally consistent
+    const receipt = { gate_config: { minSamples: 20 }, rolling_samples: [], held_out: [], frozen_sha256: forged._meta.sha256, result: { promote: true } };
+    assert.throws(() => replayPromotion({ receipt, frozen: forged }), /out-of-band pin/);
+  });
+
+  // Finding 5 (LOW): a receipt with no claimed result is not "accepted".
+  test("should_notAccept_aReceiptWithNoClaimedResult", () => {
+    const receipt = { gate_config: { minSamples: 20 }, rolling_samples: [], held_out: winChallenger, frozen_sha256: FROZEN._meta.sha256 };
+    const out = replayPromotion({ receipt, frozen: loadFrozen() });
+    assert.equal(out.accepted, false);
+    assert.match(out.mismatches.join(";"), /no claimed result/);
   });
 });
