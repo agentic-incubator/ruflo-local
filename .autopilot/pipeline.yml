@@ -176,19 +176,22 @@ phases:
     ddd:   []
 
   # ── D6 (renumbered → 7): per-request locality (gated on promotion) ───────────
+  # ── D6 → 7 (re-scoped 2026-07-05, Option A): forward-compatible locality, no breaking flip ─
   - id: 7
-    goal: "Adopt tier-schema v2 so the promoted per-question router can pick local-vs-frontier per request (not just per tier alias): migrate config/routing/ruflo-tiers.json to v2 with per-request locality/base_url and flip the invariant check. Gated to run after Phase 5 promotion."
+    goal: "Make the tier schema FORWARD-compatible and DECLARE per-request locality, without a breaking v2 flip and without waiting on a promotion that never fired. Grounding (2026-07-05): nothing runtime reads ruflo-tiers.json's schema_version (it's inert config metadata); per-request locality is ALREADY enforced at runtime (router.mjs `pinnedPrivate` → tier-private, never off-box) and tested airtight; ruflo does not define/require a v2 tier-locality schema. So the low-risk move is ADDITIVE + documentary, not a migration: each tier declares its DEFAULT locality (additive metadata ruflo/LiteLLM ignore), the invariant accepts schema_version ∈ {1,2}, and the per-request-override model is documented. Materializing a full v2 + activating it stays gated on a real promotion (phases 5/10) — this phase just makes the capability available and future-proof."
     deliverables:
-      - "config/routing/ruflo-tiers.json migrated to schema v2 (per-request locality + base_url), preserving the four-tier vocabulary and the tier-private no-fallback pin."
-      - "The v1 schema-invariant check updated to v2 across the pipeline/profile; docs/guide/reference/tiers-and-routing.md updated for the v2 shape."
+      - "config/routing/ruflo-tiers.json: add an ADDITIVE `locality` field to each tier (local for tier-fast/heavy/private, cloud for frontier) — extra metadata ruflo/LiteLLM ignore; the `tiers` map shape they consume is UNCHANGED. schema_version may stay 1 or bump to 2 with all-v1 defaults."
+      - "docs/guide/reference/tiers-and-routing.md: document that per-request locality is a RUNTIME request concern (the router's `pinnedPrivate` flag), that tiers declare only DEFAULT locality, and the (future) v2 shape a promoted per-question router would use."
     definition_of_done:
-      - "cmd: jq -e '._meta.schema_version == 2' config/routing/ruflo-tiers.json  — v2 adopted"
-      - "cmd: jq -e '[.. | objects | select(has(\"locality\"))] | length > 0' config/routing/ruflo-tiers.json  — per-request locality present"
-      - "cmd: jq -e . config/routing/ruflo-tiers.json >/dev/null  — still valid JSON"
-      - "grep: locality in docs/guide/reference/tiers-and-routing.md  — v2 documented"
-      - "cmd: docker compose config -q  — the stack still assembles"
-    conventions: "Do NOT break the four-tier alias vocabulary or the tier-private local-only guarantee. This phase runs only once Phase 5 has actually promoted a per-question router (the gated follow-on)."
-    depends_on: [5]
+      - "cmd: jq -e '._meta.schema_version as $v | $v == 1 or $v == 2' config/routing/ruflo-tiers.json  — invariant accepts v1 OR v2 (forward-compatible; no breaking flip)"
+      - "cmd: jq -e '.tiers | to_entries | all(.value | has(\"locality\"))' config/routing/ruflo-tiers.json  — every tier declares a default locality (additive; tiers are haiku/sonnet/opus → tier-fast/heavy/frontier)"
+      - "cmd: jq -e '.tiers | to_entries | all(if .value.openrouter_alt == \"tier-frontier\" then .value.locality == \"cloud\" else .value.locality == \"local\" end)' config/routing/ruflo-tiers.json  — frontier=cloud, local tiers=local"
+      - "cmd: jq -e . config/routing/ruflo-tiers.json >/dev/null  — valid JSON"
+      - "grep: locality in docs/guide/reference/tiers-and-routing.md  — the runtime-override model + tier defaults documented"
+      - "prose: the tier-private local-only pin is preserved — it stays a gateway alias with no fallback (litellm-config) + the runtime router.mjs `pinnedPrivate` lane; tier-private is deliberately NOT in ruflo-tiers.json's tier-alts map, so nothing here can weaken it."
+      - "cmd: docker compose config -q  — the stack still assembles (consumed config shape unchanged)"
+    conventions: "NON-BREAKING + ADDITIVE ONLY. Do NOT change the `tiers` map shape ruflo/LiteLLM consume, do NOT touch the rendered gateway configs, and do NOT reimplement per-request locality (it already lives — correctly and tested — in router.mjs/reflex.mjs `pinnedPrivate`). The tier-private local-only guarantee is inviolable (locality:local, no fallback). Full v2 materialization + its activation stay gated on a real promotion; this phase only makes the capability declared and forward-compatible."
+    depends_on: [4]
     adrs:  []
     ddd:   []
 
