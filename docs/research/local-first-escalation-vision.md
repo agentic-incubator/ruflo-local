@@ -9,7 +9,8 @@
 > statements below — the judge "on the bench", the learner "off and empty" — describe the
 > **pre-implementation** state. That escalation loop was first built as a tested
 > reference/overlay layer (`scripts/lib/{reflex,recorder,train-router,promotion-gate}.mjs`,
-> 191 passing tests) by the `local-first-learned-routing` pipeline; `reflex.mjs` and
+> 191 passing tests at the time) by the `local-first-learned-routing` pipeline (test count has
+> grown since; see `CLAUDE.md`'s Build & Test section for the current total); `reflex.mjs` and
 > `recorder.mjs` are now **wired into the live gateway request path** too (`scripts/gateway-server.mjs`,
 > the `live-routing-cutover` pipeline, phases 0-8) — `train-router.mjs`/`promotion-gate.mjs`
 > remain offline-only by design (they train/gate the model the live loop uses, never serve a
