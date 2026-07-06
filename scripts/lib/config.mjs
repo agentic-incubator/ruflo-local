@@ -59,6 +59,13 @@ export function gatewayServerConfig(env = process.env) {
   };
 }
 
+/** route-gateway's router wiring — which reference policy file backs category floors. */
+export function routerPolicyConfig(env = process.env) {
+  return {
+    policyFile: str("ROUTER_POLICY_FILE", "config/routing/router-policy.example.json", env),
+  };
+}
+
 /** bench-gateway surface (MODEL / N). */
 export function benchConfig(env = process.env) {
   return {

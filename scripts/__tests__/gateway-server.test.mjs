@@ -194,3 +194,194 @@ test("GATEWAY_UPSTREAM_URL env override selects the upstream when no explicit up
 
   await closeAll(gateway, upstream);
 });
+
+// =============================================================================
+// Phase 1 — router.mjs wiring: metadata.agentType routing, explicit-tier bypass
+// (the privacy pin included), and fail-open when route() throws or is absent a signal.
+// =============================================================================
+
+function echoUpstream() {
+  return startFakeUpstream((req, res) => {
+    const chunks = [];
+    req.on("data", (chunk) => chunks.push(chunk));
+    req.on("end", () => {
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify({ receivedBody: Buffer.concat(chunks).toString() }));
+    });
+  });
+}
+
+async function receivedModel(res) {
+  return JSON.parse(JSON.parse(res.body).receivedBody).model;
+}
+
+test("rewrites `model` to the router-resolved tier when metadata.agentType is present", async () => {
+  const { server: upstream, port: upstreamPort } = await echoUpstream();
+  let callArgs = null;
+  const routeFn = async (args) => {
+    callArgs = args;
+    return { tier: "tier-heavy" };
+  };
+  const gateway = createGatewayServer({ upstream: `http://127.0.0.1:${upstreamPort}`, routeFn });
+  const gatewayPort = await listen(gateway);
+
+  const res = await request(gatewayPort, "/v1/chat/completions", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ model: "auto", metadata: { agentType: "reviewer" }, messages: [] }),
+  });
+
+  assert.equal(await receivedModel(res), "tier-heavy");
+  assert.equal(callArgs.agentType, "reviewer");
+
+  await closeAll(gateway, upstream);
+});
+
+test("leaves an explicit tier alias in `model` untouched and never calls route()", async () => {
+  for (const tier of ["tier-fast", "tier-heavy", "tier-frontier", "tier-private"]) {
+    const { server: upstream, port: upstreamPort } = await echoUpstream();
+    let called = false;
+    const routeFn = async () => {
+      called = true;
+      return { tier: "tier-frontier" };
+    };
+    const gateway = createGatewayServer({ upstream: `http://127.0.0.1:${upstreamPort}`, routeFn });
+    const gatewayPort = await listen(gateway);
+    const requestBody = JSON.stringify({ model: tier, metadata: { agentType: "reviewer" }, messages: [] });
+
+    const res = await request(gatewayPort, "/v1/chat/completions", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: requestBody,
+    });
+
+    assert.equal(await receivedModel(res), tier, `explicit tier ${tier} must pass through unchanged`);
+    assert.equal(called, false, `route() must never be called for explicit tier ${tier}`);
+
+    await closeAll(gateway, upstream);
+  }
+});
+
+test("fails open (forwards the original model) when route() throws", async () => {
+  const { server: upstream, port: upstreamPort } = await echoUpstream();
+  const routeFn = async () => {
+    throw new Error("router.mjs blew up");
+  };
+  const gateway = createGatewayServer({ upstream: `http://127.0.0.1:${upstreamPort}`, routeFn });
+  const gatewayPort = await listen(gateway);
+  const requestBody = JSON.stringify({ model: "auto", metadata: { agentType: "coder" }, messages: [] });
+
+  const res = await request(gatewayPort, "/v1/chat/completions", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: requestBody,
+  });
+
+  assert.equal(res.status, 200);
+  assert.equal(await receivedModel(res), "auto"); // unchanged — fail open, never crash
+
+  await closeAll(gateway, upstream);
+});
+
+test("forwards unchanged when there is no explicit tier and no metadata.agentType", async () => {
+  const { server: upstream, port: upstreamPort } = await echoUpstream();
+  let called = false;
+  const routeFn = async () => {
+    called = true;
+    return { tier: "tier-frontier" };
+  };
+  const gateway = createGatewayServer({ upstream: `http://127.0.0.1:${upstreamPort}`, routeFn });
+  const gatewayPort = await listen(gateway);
+  const requestBody = JSON.stringify({ model: "gpt-4-ish", messages: [] });
+
+  const res = await request(gatewayPort, "/v1/chat/completions", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: requestBody,
+  });
+
+  assert.equal(await receivedModel(res), "gpt-4-ish");
+  assert.equal(called, false);
+
+  await closeAll(gateway, upstream);
+});
+
+test("treats an empty-string metadata.agentType the same as no agentType at all", async () => {
+  const { server: upstream, port: upstreamPort } = await echoUpstream();
+  let called = false;
+  const routeFn = async () => {
+    called = true;
+    return { tier: "tier-frontier" };
+  };
+  const gateway = createGatewayServer({ upstream: `http://127.0.0.1:${upstreamPort}`, routeFn });
+  const gatewayPort = await listen(gateway);
+  const requestBody = JSON.stringify({ model: "auto", metadata: { agentType: "" }, messages: [] });
+
+  const res = await request(gatewayPort, "/v1/chat/completions", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: requestBody,
+  });
+
+  assert.equal(await receivedModel(res), "auto");
+  assert.equal(called, false);
+
+  await closeAll(gateway, upstream);
+});
+
+test("wires the real router.mjs route() by default and honors the shipped policy floor", async () => {
+  // No routeFn override — exercises actual production wiring: real router.mjs + the
+  // shipped config/routing/router-policy.example.json, which floors "reviewer" at
+  // tier-heavy. The real budgetSnapshot() hits this same fake upstream's /metrics
+  // (echoed back, not real Prometheus text) and reads 0 utilization — harmless here
+  // since a tier-heavy target is never budget-steered.
+  const { server: upstream, port: upstreamPort } = await echoUpstream();
+  const gateway = createGatewayServer({ upstream: `http://127.0.0.1:${upstreamPort}` });
+  const gatewayPort = await listen(gateway);
+  const requestBody = JSON.stringify({ model: "auto", metadata: { agentType: "reviewer" }, messages: [] });
+
+  const res = await request(gatewayPort, "/v1/chat/completions", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: requestBody,
+  });
+
+  assert.equal(await receivedModel(res), "tier-heavy");
+
+  await closeAll(gateway, upstream);
+});
+
+test("a body exactly at the cap succeeds (off-by-one boundary check)", async () => {
+  const { server: upstream, port: upstreamPort } = await echoUpstream();
+  const gateway = createGatewayServer({ upstream: `http://127.0.0.1:${upstreamPort}` });
+  const gatewayPort = await listen(gateway);
+  const exactCap = "x".repeat(10 * 1024 * 1024); // exactly MAX_BODY_BYTES — must NOT be rejected
+
+  const res = await request(gatewayPort, "/v1/chat/completions", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: exactCap,
+  });
+
+  assert.equal(res.status, 200);
+  assert.equal(JSON.parse(res.body).receivedBody.length, exactCap.length);
+
+  await closeAll(gateway, upstream);
+});
+
+test("a body larger than the cap is rejected with 413 instead of hanging or crashing", async () => {
+  const { server: upstream, port: upstreamPort } = await echoUpstream();
+  const gateway = createGatewayServer({ upstream: `http://127.0.0.1:${upstreamPort}` });
+  const gatewayPort = await listen(gateway);
+  const oversized = "x".repeat(11 * 1024 * 1024); // over the 10MB cap
+
+  const res = await request(gatewayPort, "/v1/chat/completions", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: oversized,
+  });
+
+  assert.equal(res.status, 413);
+
+  await closeAll(gateway, upstream);
+});
