@@ -10,48 +10,12 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import http from "node:http";
 import net from "node:net";
-import { createGatewayServer } from "../gateway-server.mjs";
-
-// Phase 3 wires a REAL recorder by default (writing to .ruvector/routing-corpus.rvf via
-// a real embedder) — irrelevant to phases 0/1's proxy/routing behavior and, left
-// unstubbed, would pollute the repo's real corpus file with test traffic on every run.
-// gw() is createGatewayServer() with that default recorder swapped for a no-op; the
-// dedicated recorder tests (gateway-server-recorder.test.mjs) inject their own.
-const NOOP_RECORD = async () => {};
-function gw(opts) {
-  return createGatewayServer({ recordFn: NOOP_RECORD, ...opts });
-}
-
-function listen(server) {
-  return new Promise((resolve) => server.listen(0, "127.0.0.1", () => resolve(server.address().port)));
-}
-
-function closeAll(...servers) {
-  return Promise.all(servers.map((s) => new Promise((resolve) => s.close(resolve))));
-}
+import { gw, listen, closeAll, request } from "./test-harness.mjs";
 
 async function startFakeUpstream(handler) {
   const server = http.createServer(handler);
   const port = await listen(server);
   return { server, port };
-}
-
-function request(port, path, opts = {}) {
-  return new Promise((resolve, reject) => {
-    const req = http.request(
-      { host: "127.0.0.1", port, path, method: opts.method ?? "GET", headers: opts.headers },
-      (res) => {
-        const chunks = [];
-        res.on("data", (chunk) => chunks.push(chunk));
-        res.on("end", () =>
-          resolve({ status: res.statusCode, headers: res.headers, body: Buffer.concat(chunks).toString() }),
-        );
-      },
-    );
-    req.on("error", reject);
-    if (opts.body) req.write(opts.body);
-    req.end();
-  });
 }
 
 test("forwards method, path, and body verbatim to the upstream", async () => {
