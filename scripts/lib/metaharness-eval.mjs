@@ -24,15 +24,17 @@
 
 import { readFileSync, mkdirSync, existsSync } from "node:fs";
 import { dirname } from "node:path";
-import { difficultyForClass, trainRouter, predict, parseJsonl, resolveEmbedder } from "./train-router.mjs";
+import { difficultyForClass, trainRouter, predict, parseJsonl, resolveEmbedder, DEFAULT_CANDIDATES } from "./train-router.mjs";
 import { isRuvllmAvailable } from "./recorder.mjs";
 import { pairedSignificance, qPerDollar } from "./promotion-gate.mjs";
 
 /** The eval cost ladder ($/1M tok, blended): a small local gradient so "cheapest adequate" is
  *  meaningful (fast < heavy ≪ frontier). Local tiers are ~free but not identical; frontier is metered. */
 export const EVAL_PRICES = { "tier-fast": 0.05, "tier-heavy": 0.15, "tier-frontier": 45.0 };
-/** Each tier's capability ceiling (difficulty it can still handle well) — matches DEFAULT_CANDIDATES. */
-export const TIER_CAPABILITY = { "tier-fast": 0.4, "tier-heavy": 0.75, "tier-frontier": 1.0 };
+/** Each tier's capability ceiling (difficulty it can still handle well) — derived from
+ *  DEFAULT_CANDIDATES' own maxDifficulty, not a hand-copied literal, so a future tier-ladder
+ *  tune in train-router.mjs can never silently desync the eval harness from the real router. */
+export const TIER_CAPABILITY = Object.fromEntries(DEFAULT_CANDIDATES.map((c) => [c.tier, c.maxDifficulty]));
 export const TIERS = Object.keys(EVAL_PRICES);
 const clamp01 = (x) => Math.max(0, Math.min(1, x));
 

@@ -34,13 +34,14 @@ import http from "node:http";
 import https from "node:https";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { gatewayServerConfig, routerPolicyConfig } from "./lib/config.mjs";
+import { gatewayServerConfig, routerPolicyConfig, resolveGatewayEnv } from "./lib/config.mjs";
 import { route as routeRequest, TIER_LADDER } from "./lib/router.mjs";
 import { reflex as reflexAnswer, isScorable, canonicalTier, escalationTier } from "./lib/reflex.mjs";
 import { RoutingRecorder, outcomeFromReflex } from "./lib/recorder.mjs";
 import { DEFAULT_CANDIDATES } from "./lib/train-router.mjs";
 import { GatewayClient } from "./lib/gateway-client.mjs";
 import { otelSpanExporter } from "./lib/otel-span.mjs";
+import { bufferStream } from "./lib/collect-body.mjs";
 
 const MODULE_DIR = path.dirname(fileURLToPath(import.meta.url));
 const EXPLICIT_TIERS = new Set([...TIER_LADDER, "tier-private"]);
@@ -188,35 +189,20 @@ function respondAndRecord(res, { statusCode, statusMessage, headers, body }, rec
  * Buffers a request body (bounded by MAX_BODY_BYTES) so it can be inspected/rewritten
  * before forwarding. Rejects with `.code` "BODY_TOO_LARGE" or "CLIENT_ABORTED" so the
  * caller can respond (or, for an aborted client, simply stop) instead of hanging.
+ * NOTE: on BODY_TOO_LARGE, the caller must NOT req.destroy() — req and res share one
+ * socket, and destroying it now would take res down with it before the 413 can ever be
+ * written, leaving the client hanging on a response that will never arrive. A client
+ * that hangs up mid-upload may surface only as 'close' (no 'error') — the same gap
+ * phase 0 found on the response side; without handling it, an abandoned upload would
+ * hang this promise forever instead of unwinding cleanly.
  */
 function collectBody(req) {
-  return new Promise((resolve, reject) => {
-    const chunks = [];
-    let total = 0;
-    let settled = false;
-    const settle = (fn, arg) => {
-      if (settled) return;
-      settled = true;
-      fn(arg);
-    };
-    req.on("data", (chunk) => {
-      total += chunk.length;
-      if (total > MAX_BODY_BYTES) {
-        // Stop accumulating, but do NOT req.destroy() here — req and res share one
-        // socket, and destroying it now would take res down with it before the 413
-        // below can ever be written, leaving the client hanging on a response that
-        // will never arrive instead of getting a clean rejection.
-        settle(reject, Object.assign(new Error("request body too large"), { code: "BODY_TOO_LARGE" }));
-        return;
-      }
-      chunks.push(chunk);
-    });
-    req.on("end", () => settle(resolve, Buffer.concat(chunks)));
-    req.on("error", (err) => settle(reject, err));
-    // A client that hangs up mid-upload may surface only as 'close' (no 'error') —
-    // the same gap phase 0 found on the response side. Without this, an abandoned
-    // upload would hang collectBody's promise forever instead of unwinding cleanly.
-    req.on("close", () => settle(reject, Object.assign(new Error("client disconnected before body completed"), { code: "CLIENT_ABORTED" })));
+  return bufferStream(req, {
+    maxBytes: MAX_BODY_BYTES,
+    tooLargeCode: "BODY_TOO_LARGE",
+    tooLargeMsg: "request body too large",
+    abortCode: "CLIENT_ABORTED",
+    abortMsg: "client disconnected before body completed",
   });
 }
 
@@ -298,14 +284,9 @@ async function prepareRequest(bodyBuffer, { routeFn, policy, env, upstream }) {
   try {
     // GW points straight at the real upstream, never at this gateway's own :4000 —
     // otherwise the budget snapshot's /metrics scrape would loop back through this
-    // same proxy instead of reaching the real gateway it needs to read.
-    // `env ?? process.env` (not `env`) here: in production `env` (== opts.env) is
-    // undefined, and `{...undefined, GW: x}` evaluates to `{GW: x}` — a DEFINED
-    // object, which would defeat every downstream `= process.env` default parameter
-    // (e.g. budgetConfig's) since default params only trigger on an undefined
-    // argument, not a sparse one. A test's explicit env object is untouched — this
-    // only changes what happens when no env was ever passed at all.
-    const decision = await routeFn({ agentType, policy, env: { ...(env ?? process.env), GW: upstream } });
+    // same proxy instead of reaching the real gateway it needs to read. See
+    // resolveGatewayEnv's own doc comment (config.mjs) for why this isn't `{...env, GW}`.
+    const decision = await routeFn({ agentType, policy, env: resolveGatewayEnv(env, upstream) });
     parsed.model = decision.tier;
     return {
       body: Buffer.from(JSON.stringify(parsed), "utf8"),
@@ -321,31 +302,17 @@ async function prepareRequest(bodyBuffer, { routeFn, policy, env, upstream }) {
 
 /**
  * Buffers the upstream's response (bounded by MAX_BODY_BYTES) so `choices[0].message.
- * content` can be judged/escalated via reflex.mjs before forwarding. Mirrors
- * collectBody's shape for the response side; kept separate (not shared) so a change to
- * request-body handling can never accidentally alter response handling or vice versa.
+ * content` can be judged/escalated via reflex.mjs before forwarding. Shares
+ * collectBody's bufferStream() helper (lib/collect-body.mjs) — same settle-once
+ * guard, distinct error codes/messages for the response side.
  */
 function collectResponseBody(proxyRes) {
-  return new Promise((resolve, reject) => {
-    const chunks = [];
-    let total = 0;
-    let settled = false;
-    const settle = (fn, arg) => {
-      if (settled) return;
-      settled = true;
-      fn(arg);
-    };
-    proxyRes.on("data", (chunk) => {
-      total += chunk.length;
-      if (total > MAX_BODY_BYTES) {
-        settle(reject, Object.assign(new Error("response body too large"), { code: "BODY_TOO_LARGE" }));
-        return;
-      }
-      chunks.push(chunk);
-    });
-    proxyRes.on("end", () => settle(resolve, Buffer.concat(chunks)));
-    proxyRes.on("error", (err) => settle(reject, err));
-    proxyRes.on("close", () => settle(reject, Object.assign(new Error("upstream closed before response completed"), { code: "UPSTREAM_ABORTED" })));
+  return bufferStream(proxyRes, {
+    maxBytes: MAX_BODY_BYTES,
+    tooLargeCode: "BODY_TOO_LARGE",
+    tooLargeMsg: "response body too large",
+    abortCode: "UPSTREAM_ABORTED",
+    abortMsg: "upstream closed before response completed",
   });
 }
 
@@ -482,16 +449,11 @@ export function createGatewayServer(opts = {}) {
 
             // GW points at the REAL upstream — the same self-loop fix as phase 1's
             // budget snapshot: the judge/escalation call must never loop back through
-            // this same gateway's own :4000. Also backs our own escalate() below.
-            // `opts.env ?? process.env` (not `opts.env`): in production opts.env is
-            // undefined, and `{...undefined, GW: x}` evaluates to the DEFINED object
-            // `{GW: x}` — which defeats every downstream `= process.env` default
-            // (gatewayConfig's LITELLM_MASTER_KEY among them), since default params
-            // only trigger on an undefined argument, not a sparse one. This silently
-            // sent every real judge/escalation call out with config.mjs's hardcoded
-            // "sk-local-master" fallback instead of the real key, since phase 2 shipped
-            // — invisible until phase 7's live escalation drill exercised a real key.
-            const reflexEnv = { ...(opts.env ?? process.env), GW: upstream.origin };
+            // this same gateway's own :4000. Also backs our own escalate() below. See
+            // resolveGatewayEnv's own doc comment (config.mjs) for why this isn't
+            // `{...opts.env, GW}` — that shape silently broke every real judge/
+            // escalation call from phase 2 until phase 7's live escalation drill caught it.
+            const reflexEnv = resolveGatewayEnv(opts.env, upstream.origin);
             let escalationUsage;
             // A behavioral clone of reflex.mjs's OWN default escalate (same
             // GatewayClient, same model/messages shape, same degrade-to-"" on any

@@ -12,6 +12,7 @@ import {
   benchConfig,
   regressionConfig,
   otelConfig,
+  resolveGatewayEnv,
 } from "../config.mjs";
 
 test("str returns default when unset or blank, override otherwise", () => {
@@ -67,4 +68,22 @@ test("otelConfig defaults to the shared collector endpoint litellm's own OTEL_EX
   assert.deepEqual(otelConfig({ OTEL_ENDPOINT: "http://collector:4318/v1/traces" }), {
     endpoint: "http://collector:4318/v1/traces",
   });
+});
+
+test("resolveGatewayEnv merges a passed env object with GW pinned to the upstream origin", () => {
+  assert.deepEqual(resolveGatewayEnv({ SOME_VAR: "x" }, "http://litellm:4000"), {
+    SOME_VAR: "x",
+    GW: "http://litellm:4000",
+  });
+});
+
+test("resolveGatewayEnv falls back to process.env (not {}) when no env override is passed — the production shape", () => {
+  process.env.RUFLO_TEST_RESOLVE_GATEWAY_ENV_MARKER = "present";
+  try {
+    const resolved = resolveGatewayEnv(undefined, "http://litellm:4000");
+    assert.equal(resolved.RUFLO_TEST_RESOLVE_GATEWAY_ENV_MARKER, "present", "a real process.env var must survive when no override is passed");
+    assert.equal(resolved.GW, "http://litellm:4000");
+  } finally {
+    delete process.env.RUFLO_TEST_RESOLVE_GATEWAY_ENV_MARKER;
+  }
 });

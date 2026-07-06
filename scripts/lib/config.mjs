@@ -91,3 +91,18 @@ export function regressionConfig(env = process.env) {
     threshold: num("REGRESSION_THRESHOLD", 0.2, env),
   };
 }
+
+/**
+ * route-gateway's env for an internal call to router.mjs/reflex.mjs — GW pinned to the
+ * REAL upstream (never this gateway's own :4000, or a self-loop) plus every other real
+ * env var. `env ?? process.env`, NOT `env`, matters here: in production `env` (an
+ * optional override, usually `opts.env`) is undefined, and `{...undefined, GW: x}`
+ * evaluates to the DEFINED object `{GW: x}` — which would defeat every downstream
+ * `= process.env` default parameter in this file (default params only trigger on an
+ * undefined argument, never a merely-sparse one), silently discarding every other real
+ * env var (LITELLM_MASTER_KEY among them) for the call. A test's explicit env object is
+ * untouched — this only changes what happens when no override was ever passed at all.
+ */
+export function resolveGatewayEnv(env, upstreamOrigin) {
+  return { ...(env ?? process.env), GW: upstreamOrigin };
+}
