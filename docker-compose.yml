@@ -56,10 +56,12 @@ services:
 
   # --- route-gateway: the single host-facing seam on :4000 --------------------
   # Always on (no `profiles:`), like otel-collector below. Phase 0 of the
-  # live-routing-cutover pipeline (docs/research/live-routing-gateway-rationale.md):
-  # a pure, byte-for-byte passthrough proxy — ZERO routing/judge/recording logic yet.
+  # live-routing-cutover pipeline (docs/research/live-routing-gateway-rationale.md)
+  # stood this up as a pure passthrough proxy; phase 1 wires router.mjs's route() in
+  # (config/routing/router-policy.example.json must be mounted for its category
+  # floors to resolve — without it every agentType silently floors to tier-fast).
   # Transparently fronts whichever of litellm/bifrost/helicone is the active profile;
-  # later phases in this pipeline wire router.mjs/reflex.mjs/recorder.mjs in here.
+  # later phases wire reflex.mjs/recorder.mjs in here too.
   # litellm/bifrost/helicone no longer bind host :4000 — only route-gateway does,
   # uniformly across all three, so exactly one container ever claims that port.
   route-gateway:
@@ -70,6 +72,7 @@ services:
       - "4000:4000"
     volumes:
       - ./scripts:/app/scripts:ro
+      - ./config:/app/config:ro
     environment:
       - GATEWAY_PORT=4000
       - GATEWAY_UPSTREAM_URL=${GATEWAY_UPSTREAM_URL:-http://litellm:4000}
