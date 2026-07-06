@@ -3,8 +3,9 @@
 //
 // Phase 0 of the live-routing-cutover pipeline (docs/research/live-routing-gateway-
 // rationale.md) stood this up as a pure, byte-for-byte passthrough reverse proxy in
-// front of whichever :4000-serving gateway profile is active (litellm | bifrost |
-// helicone). Phase 1 wired router.mjs's route() into the REQUEST side: a request
+// front of whichever internal gateway profile is active (litellm | bifrost | helicone —
+// none of them bind a host port; GATEWAY_UPSTREAM_URL picks which one this forwards to).
+// Phase 1 wired router.mjs's route() into the REQUEST side: a request
 // carrying metadata.agentType gets its `model` rewritten to the router-resolved tier;
 // an explicit tier alias (including tier-private — the privacy pin) bypasses route()
 // entirely. Phase 2 wires reflex.mjs into the RESPONSE side: a scorable-tier

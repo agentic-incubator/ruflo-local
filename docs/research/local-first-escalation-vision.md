@@ -5,12 +5,16 @@
 > Companion to the technical set (`architecture-rfc.md`, `metaharness-and-ruflo-local.md`,
 > `limitations-and-mitigations.md`). This page is deliberately jargon-light.
 >
-> **Status (phases 0–10 shipped):** this page frames the *motivation*. Several "current
-> problem" statements below — the judge "on the bench", the learner "off and empty" — describe
-> the **pre-implementation** state. That escalation loop has since been built as a tested
+> **Status (2026-07-06):** this page frames the *motivation*. Several "current problem"
+> statements below — the judge "on the bench", the learner "off and empty" — describe the
+> **pre-implementation** state. That escalation loop was first built as a tested
 > reference/overlay layer (`scripts/lib/{reflex,recorder,train-router,promotion-gate}.mjs`,
-> 191 passing tests), though it is **not yet wired into the live gateway request path**. Read
-> the "problems" as the *why this repo exists*, not the *current runtime state*.
+> 191 passing tests) by the `local-first-learned-routing` pipeline; `reflex.mjs` and
+> `recorder.mjs` are now **wired into the live gateway request path** too (`scripts/gateway-server.mjs`,
+> the `live-routing-cutover` pipeline, phases 0-8) — `train-router.mjs`/`promotion-gate.mjs`
+> remain offline-only by design (they train/gate the model the live loop uses, never serve a
+> request directly). Read the "problems" as the *why this repo exists*, not the *current
+> runtime state*.
 
 ## The one-sentence vision
 

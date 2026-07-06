@@ -3,16 +3,18 @@
 // ruflo route(), map that agent to its per-agent-type tier FLOOR, then let the budget
 // snapshot STEER (not just alert).
 //
-// STATUS: reference/overlay code — runs in unit tests + offline/shadow tooling, NOT in the
-// live request path (live traffic is served by the gateway / LiteLLM config). Import route()
-// into your router to make it live. See docs/guide/reference/architecture-rfc.md (Path 2).
+// STATUS: LIVE — called from scripts/gateway-server.mjs's request path (phase 1 of the
+// live-routing-cutover pipeline wired route() in, 2026-07-06). See
+// docs/research/live-routing-gateway-rationale.md and docs/guide/reference/architecture-rfc.md (Path 2).
 //
 // Grounded in ruflo's real behavior: `ruflo route <task>` is a Q-learning AGENT router
 // (it returns Architect / Coder / Reviewer / …), NOT a model-tier router. So the product
 // wiring is: ruflo picks the agent/category → config/routing/router-policy.example.json
 // maps agent → tier floor → this router applies difficulty + budget on top.
 //
-// Decision order (tier-schema v1 — no per-request locality yet, that is Phase 6):
+// Decision order (per-request locality is the privacy lane below — pinnedPrivate → tier-private;
+// tiers.json's own `locality` field, added in the local-first-learned-routing pipeline's phase 7,
+// only declares each tier's DEFAULT locality, not a per-request override):
 //   1. Privacy lane: a pinned-private request stays tier-private — never scored off-box,
 //      never demoted, never escalated (and its task never reaches ruflo's argv).
 //   2. Category: agentType (given) or derived from ruflo route() (injectable).
@@ -82,7 +84,7 @@ export async function defaultRufloAgent({ task = "", env = process.env } = {}) {
   const { execFile } = await import("node:child_process");
   const { promisify } = await import("node:util");
   const bin = str("RUFLO_BIN", "npx", env);
-  const ver = str("RUFLO_SPEC", "ruflo@3.21.1", env);
+  const ver = str("RUFLO_SPEC", "ruflo@3.25.1", env);
   const args = bin === "npx" ? ["-y", ver, "route", task] : ["route", task];
   try {
     const { stdout } = await promisify(execFile)(bin, args, { timeout: 45000 });

@@ -1,6 +1,6 @@
 # 🔀 Gateway Variants (litellm · bifrost · helicone)
 
-> **What this covers:** the gateway is **pluggable** — exactly one of three OpenAI-compatible gateways runs on the `:4000` seam at a time. LiteLLM is the default; Bifrost and Helicone are opt-in performance variants. This is how you choose and switch.
+> **What this covers:** the gateway is **pluggable** — `route-gateway` is the always-on host `:4000` seam; exactly one of three OpenAI-compatible gateways runs *behind* it at a time, internal-only. LiteLLM is the default; Bifrost and Helicone are opt-in performance variants. This is how you choose and switch.
 
 ← Back to [Technical Guide](../getting-started-technical.md) · Related: [Tiers & Routing](tiers-and-routing.md) · [Observability](observability.md)
 
@@ -8,7 +8,7 @@
 
 ## 🎛️ One selector, one gateway
 
-All three gateways are compose **profiles**; a single `COMPOSE_PROFILES` selector picks the active one. They are **mutually exclusive** — each claims host `:4000`, and only one profile is ever active:
+All three gateways are compose **profiles**; a single `COMPOSE_PROFILES` selector picks the active one. They are **mutually exclusive** — `route-gateway` owns host `:4000` and forwards to whichever profile is active (via `GATEWAY_UPSTREAM_URL`); only one profile is ever active:
 
 | Gateway | Profile | What it is | Pick it when |
 |---|---|---|---|
@@ -20,19 +20,33 @@ The shipped `.env` sets `COMPOSE_PROFILES=litellm`, so **`docker compose up -d` 
 
 > [!IMPORTANT]
 > `COMPOSE_PROFILES` **must** name exactly **one** gateway:
-> - **Empty** → **no** gateway starts (`:4000` is dead). Existing users upgrading from a pre-variants `.env`: add `COMPOSE_PROFILES=litellm` (or `cp .env.example .env`).
-> - **Two** (e.g. `litellm,bifrost`) → **both** start and both claim host `:4000` → `docker compose up` fails with a port-allocation error. Only combine a gateway with *overlays* (`litellm,gpu` / `litellm,router`), never with another gateway.
+> - **Empty** → **no** upstream gateway starts, but `route-gateway` still comes up on host `:4000`
+>   (it's always-on, unprofiled) — with nothing behind it, every request 502s instead of the
+>   port simply being dead. Existing users upgrading from a pre-variants `.env`: add
+>   `COMPOSE_PROFILES=litellm` (or `cp .env.example .env`).
+> - **Two** (e.g. `litellm,bifrost`) → **both containers start** (neither binds a host port
+>   anymore, so there's no port-allocation conflict) — but `route-gateway` only ever forwards
+>   to the one named in `GATEWAY_UPSTREAM_URL` (default `http://litellm:4000`), so the other
+>   just runs orphaned, wasting resources without ever serving a request. Only combine a
+>   gateway with *overlays* (`litellm,gpu` / `litellm,router`), never with another gateway.
 
 ### Switching gateways
+
+> **`COMPOSE_PROFILES` alone is not enough.** `route-gateway` (host `:4000`) never restarts when
+> you switch profiles — it forwards to whatever `GATEWAY_UPSTREAM_URL` points at, which does NOT
+> follow `COMPOSE_PROFILES` automatically. Set both together, or `route-gateway` keeps forwarding
+> to the OLD upstream (which is no longer running) and every request 502s.
+
 ```bash
 # Default — LiteLLM (from the shipped .env):
 docker compose up -d
 
-# Switch to Bifrost (stops litellm, starts bifrost on the same :4000 seam):
-COMPOSE_PROFILES=bifrost docker compose up -d --remove-orphans
+# Switch to Bifrost (litellm stops; bifrost starts internal-only on :8080; route-gateway
+# itself never restarts — point it at bifrost via GATEWAY_UPSTREAM_URL):
+COMPOSE_PROFILES=bifrost GATEWAY_UPSTREAM_URL=http://bifrost:8080 docker compose up -d --remove-orphans
 
 # Back to LiteLLM:
-COMPOSE_PROFILES=litellm docker compose up -d --remove-orphans
+COMPOSE_PROFILES=litellm GATEWAY_UPSTREAM_URL=http://litellm:4000 docker compose up -d --remove-orphans
 ```
 Shared infra — Ollama, Prometheus, Grafana, the OTel collector — is **not** profiled, so it stays up across a switch. Add GPU/router overlays by combining profiles: `COMPOSE_PROFILES=litellm,gpu`.
 
@@ -51,7 +65,7 @@ Bifrost (Go, [maximhq/bifrost](https://github.com/maximhq/bifrost)) is a µs-cla
 | Fallbacks | `litellm_settings.fallbacks` | `models.tier-frontier.fallbacks` |
 | Metrics | `/metrics` (Prom) | native Prometheus (job `bifrost`) |
 | OTel spans | `otel` callback → collector | native OTel → collector |
-| Port | `:4000` | listens `:8080`, mapped to host `:4000` |
+| Port | internal `:4000` | internal `:8080` — neither has a host port; `route-gateway` (host `:4000`) reaches whichever is active by service name |
 
 > [!WARNING]
 > **Privacy pin under Bifrost — verify it, don't assume it.** `tier-private` in `config/gateways/bifrost-config.json` has an **empty `fallbacks` list** (the same intent as LiteLLM keeping it out of every chain). But this rests on Bifrost honoring that (unverified) schema key, and `smoke-test.sh`'s privacy check only catches a leak if Bifrost returns the **resolved** model name (not just the `tier-private` alias). So after switching: confirm the resolved model in `config/gateways/bifrost-config.json` is local-only **and** re-run the smoke check. The guarantee is **inviolable by design** across variants — but under an experimental gateway you must validate the config actually enforces it.

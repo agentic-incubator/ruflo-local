@@ -170,3 +170,35 @@ embeddings and a synthetic-but-principled ground truth (`difficultyForClass`).
 - **Re-open condition:** re-run against a materialized `.ruvector` routing corpus (real telemetry,
   n ≫ 20). If metaharness still wins there, adopt it and disable ruflo's learner per the
   two-learners caveat in `metaharness-and-ruflo-local.md` §5. Never run both live at once.
+
+## Decision log — go-live gap closed (`live-routing-cutover`, 2026-07-06)
+
+*Recorded 2026-07-06. Autopilot pipeline `live-routing-cutover`, phases 0-8 (complete).*
+
+Every module above (`router.mjs`, `reflex.mjs`, `recorder.mjs`) was built and unit-tested by the
+`local-first-learned-routing` pipeline but had **never run against a real request** — a gap this
+project's own docs did not consistently disclose (see the correction to `ruvector-gateway-rationale.md`
+and `tiers-and-routing.md`, same date). `live-routing-cutover` closes it: `scripts/gateway-server.mjs`
+(`route-gateway`) is now the always-on host-facing `:4000` seam, calling `route()` (phase 1),
+`reflex()` (phase 2), and `RoutingRecorder` (phase 3) live, on every real request; litellm/bifrost/
+helicone lost their host `:4000` bind (internal-only now).
+
+The "Verification" section above described how we'd eventually know each mechanism worked; both are
+now proven live, not just unit-tested:
+- **The known-bad-answer escalation drill** (phase 7's `smoke-test.sh` addition, using litellm's
+  `mock_response` to force a deterministic bad local answer): a real judge call scores it below
+  threshold, a real frontier call replaces it — verified against a live gateway with a real provider
+  key, not a mocked upstream.
+- **The privacy pin** (`tier-private` → zero judge/escalation egress calls): proven live in phase 2,
+  including two real exploit fixes (a mis-cased/whitespace bypass, a Unicode-homoglyph bypass) found
+  by adversarial review against the actual running server, not just reflex.mjs in isolation.
+- **A real DRACO row per request** (phase 3, real embedding via `@ruvector/ruvllm`): proven live in
+  phase 4 (persisted across a container restart) and phase 7 (corpus grows by exactly 1 row per
+  real call, with a real, non-stub embedding).
+
+One further defect only live testing could find (mocked-upstream unit tests are structurally blind to
+it): phase 7's live escalation drill discovered `route-gateway`'s real judge/escalation calls had been
+silently authenticating with the wrong hardcoded default key since phase 2 shipped — `docker-compose.yml`
+never passed `LITELLM_MASTER_KEY` through, compounded by a JS object-spread bug that discarded every
+other real env var for those internal calls. Fixed the same phase; see `scripts/gateway-server.mjs`'s
+`resolveGatewayEnv` (phase 8) for the consolidated fix.
