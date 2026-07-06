@@ -19,13 +19,13 @@ commands:
   # Static validation: every config artifact (yamllint + shellcheck + json parse) PLUS a
   # tolerant syntax check of any Node ESM modules (node --check via find — portable to macOS
   # bash 3.2, recurses into __tests__/, and is a clean no-op before scripts/lib/ exists).
-  lint:            "yamllint -c .yamllint docker-compose.yml config/gateways/litellm-config.yaml config/observability/prometheus.yml config/observability/grafana-datasources.yml config/observability/otel-collector-config.yaml config/gateways/helicone-config.yaml && shellcheck smoke-test.sh scripts/*.sh && jq -e . config/routing/ruflo-tiers.json config/routing/router-policy.example.json config/gateways/bifrost-config.json >/dev/null && bash -c 'rc=0; if [ -d scripts/lib ]; then while IFS= read -r f; do node --check \"$f\" || rc=1; done < <(find scripts/lib -name \"*.mjs\"); fi; exit $rc'"
+  lint:            "yamllint -c .yamllint docker-compose.yml config/gateways/litellm-config.yaml config/observability/prometheus.yml config/observability/grafana-datasources.yml config/observability/otel-collector-config.yaml config/gateways/helicone-config.yaml && shellcheck smoke-test.sh scripts/*.sh && jq -e . config/routing/ruflo-tiers.json config/routing/router-policy.example.json config/gateways/bifrost-config.json >/dev/null && bash -c 'rc=0; if [ -d scripts ]; then while IFS= read -r f; do node --check \"$f\" || rc=1; done < <(find scripts -name \"*.mjs\"); fi; exit $rc'"
   # No compile step for the config layer; validate the merged Compose file renders. Once the
   # Phase-8 Rust sidecar exists, also build it (failure propagates — no masking).
   build:           "docker compose config -q && bash -c 'if [ -f gateway/Cargo.toml ]; then cargo build --release --manifest-path gateway/Cargo.toml; fi'"
   # Node built-in test runner over scripts/lib/__tests__/ (tolerant before any test exists), plus
   # cargo test once gateway/ exists. No package.json / vitest — node:test + node:assert only.
-  test:            "bash -c 'rc=0; if ls scripts/lib/__tests__/*.test.mjs >/dev/null 2>&1; then node --test scripts/lib/__tests__/*.test.mjs || rc=1; fi; if [ -f gateway/Cargo.toml ]; then cargo test --manifest-path gateway/Cargo.toml || rc=1; fi; exit $rc'"
+  test:            "bash -c 'rc=0; for d in scripts/lib/__tests__ scripts/__tests__; do if ls \"$d\"/*.test.mjs >/dev/null 2>&1; then node --test \"$d\"/*.test.mjs || rc=1; fi; done; if [ -f gateway/Cargo.toml ]; then cargo test --manifest-path gateway/Cargo.toml || rc=1; fi; exit $rc'"
   # End-to-end drill against the running gateway (health, tier routing, fallback, privacy pin, metrics).
   test_integration: "./smoke-test.sh"
   # No UI package.
