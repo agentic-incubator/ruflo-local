@@ -144,12 +144,12 @@ services:
 
   # --- Alternative gateway: Bifrost (Go, µs-class overhead, native OTel) ---
   # Activate INSTEAD of litellm:  COMPOSE_PROFILES=bifrost docker compose up -d
-  # Mutually exclusive with litellm/helicone — all three claim host :4000, and only
-  # one profile is active at a time. Preserves the four-tier alias vocabulary and the
-  # tier-private no-fallback privacy pin (see bifrost-config.json). Bifrost listens on
-  # :8080 internally; we map it to the same :4000 seam so clients don't change.
+  # Mutually exclusive with litellm/helicone — route-gateway forwards to exactly one
+  # (via GATEWAY_UPSTREAM_URL), so only one profile is ever the active upstream. Preserves
+  # the four-tier alias vocabulary and the tier-private no-fallback privacy pin (see
+  # bifrost-config.json). Bifrost listens on :8080 internally — no host port at all;
+  # route-gateway (host :4000) reaches it by service name.
   # EXPERIMENTAL: verify the image tag + config schema against your Bifrost release.
-  # Internal-only (:8080) — route-gateway owns host :4000 and reaches this by service name.
   bifrost:
     image: maximhq/bifrost:v1.5.2
     container_name: bifrost
@@ -168,11 +168,11 @@ services:
 
   # --- Alternative gateway: Helicone AI Gateway (Rust, native OTel + budgets/cache) ---
   # Activate INSTEAD of litellm/bifrost:  COMPOSE_PROFILES=helicone docker compose up -d
-  # Mutually exclusive — claims host :4000 like the others. Mirrors the four tiers as
-  # named routers (clients call /router/tier-<x>); tier-private routes to one local
-  # model with no fallback (privacy pin). Listens :8080 internally, mapped to :4000.
+  # Mutually exclusive — route-gateway forwards to exactly one upstream, like the others.
+  # Mirrors the four tiers as named routers (clients call /router/tier-<x>); tier-private
+  # routes to one local model with no fallback (privacy pin). Listens :8080 internally —
+  # no host port at all; route-gateway (host :4000) reaches it by service name.
   # EXPERIMENTAL: verify the image tag + config schema against your Helicone release.
-  # Internal-only (:8080) — route-gateway owns host :4000 and reaches this by service name.
   helicone:
     image: helicone/ai-gateway:v1.0.0
     container_name: helicone

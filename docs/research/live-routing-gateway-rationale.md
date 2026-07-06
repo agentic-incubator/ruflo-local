@@ -2,9 +2,13 @@
 
 *Research note. Last validated: 2026-07-05.*
 
-> **Delivery status (2026-07-05):** parked as its own standalone autopilot plan,
-> `live-routing-cutover` — at `.autopilot/queued/live-routing-cutover.pipeline.yml`. Promote
-> to run. Independent of `ruvector-gateway` (Rust) and `corpus-durability`.
+> **Delivery status (2026-07-06):** SHIPPED. The `live-routing-cutover` autopilot plan this
+> doc motivated is complete (phases 0-8, squash-merged into `develop`) — `scripts/gateway-server.mjs`
+> now fronts host `:4000` and calls `router.mjs`/`reflex.mjs`/`recorder.mjs` live, on every
+> request. The audit and evidence below describe the state THIS DOC FOUND on 2026-07-05 (the
+> problem this plan fixed) — it is historical motivation, not the current runtime state. See
+> `docs/research/routing-refactor-decisions.md`'s "go-live gap closed" decision-log entry for
+> the closure. Independent of `ruvector-gateway` (Rust) and `corpus-durability`, both still queued.
 
 **TL;DR** — An audit of `ruvector-gateway-rationale.md` against the actual code (2026-07-05)
 found that `router.mjs`, `reflex.mjs`, and `recorder.mjs` are **not** in the live request
@@ -29,12 +33,14 @@ the design can be traced and proven at runtime, not just asserted in docs.
 | ⚠️ **Contradiction found** | A doc/pipeline claim that does not match the cited code. |
 
 **Sources (grounded 2026-07-05):**
-- ⚠️ `docs/research/ruvector-gateway-rationale.md` §2–§5 — depicts `router.mjs`/`reflex.mjs`/
-  `recorder.mjs` inside the live "NODE OVERLAY... per request" hot path.
+- ⚠️ `docs/research/ruvector-gateway-rationale.md` §2–§5 (as of 2026-07-05, before this plan's
+  correction pass) — depicted `router.mjs`/`reflex.mjs`/`recorder.mjs` inside the live "NODE
+  OVERLAY... per request" hot path, which was aspirational at the time, not actual.
 - ✅ `scripts/lib/router.mjs:6-8`, `scripts/lib/reflex.mjs:10-12`, `scripts/lib/recorder.mjs:4-6`
-  — each module's own header: *"NOT in the live request path (live traffic is served by the
-  gateway / LiteLLM config)."*
-- ✅ `docs/guide/reference/tiers-and-routing.md:36` — "that overlay is reference code, not yet
+  (as of 2026-07-05) — each module's own header: *"NOT in the live request path (live traffic
+  is served by the gateway / LiteLLM config)."* **Historical quote** — this plan's phase 9
+  updated these headers to `STATUS: LIVE` once phases 1-3 actually wired them in.
+- ✅ `docs/guide/reference/tiers-and-routing.md:36` (as of 2026-07-05) — "that overlay is reference code, not yet
   wired into the live request path... On live traffic, the gateway alias is what holds the pin."
 - ⚠️ `.autopilot/pipeline.yml:181,193` (phase 7 goal/conventions) — asserts "per-request
   locality is ALREADY enforced at runtime... router.mjs `pinnedPrivate`... correctly and

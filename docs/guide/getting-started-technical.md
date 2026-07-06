@@ -23,7 +23,7 @@ flowchart LR
         C3[Any OpenAI-SDK app]
     end
     C1 & C2 & C3 -->|"model = tier-fast / tier-heavy / tier-frontier / tier-private"| GW
-    subgraph GW["LiteLLM Gateway :4000 — the seam you own"]
+    subgraph GW["route-gateway :4000 — the seam you own (fronts LiteLLM · Bifrost · Helicone)"]
         AL["Tier aliases"] --> FB["Fallback ladder<br/>fast → heavy → frontier"]
         FB --> BG["Budget gates<br/>$/day per provider · RPM/TPM"]
     end

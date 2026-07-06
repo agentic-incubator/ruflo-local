@@ -1,6 +1,8 @@
 # ruvector-gateway — why, and what it removes
 
-*Research note. Last validated: 2026-07-05.*
+*Research note. Last validated: 2026-07-05; §2/§3 diagrams and the TL;DR corrected 2026-07-06 to
+describe the ACTUAL live request path (`live-routing-cutover` pipeline, phases 0-8) rather than the
+aspirational one this doc originally described.*
 
 > **Delivery status (2026-07-05):** this work is now its **own standalone autopilot plan**,
 > `ruvector-gateway` — parked at `.autopilot/queued/ruvector-gateway.pipeline.yml` (was phase 11 of
@@ -9,8 +11,10 @@
 
 **TL;DR** — The `ruvector-gateway` (its own `ruvector-gateway` plan, the RFC's **Path 4**) is **not new
 capability** — it is the *already-proven* Node routing loop, **compiled into one native Rust hop**.
-Today the learned-routing loop lives in ~14 JavaScript modules (`scripts/lib/*.mjs`) invoked
-*around* each request, with LiteLLM as a *separate* serving proxy. The gateway collapses **decide →
+Today the learned-routing loop lives in ~14 JavaScript modules (`scripts/lib/*.mjs`), called
+in-process from `scripts/gateway-server.mjs` (`route-gateway`, the host-facing `:4000` seam since
+the `live-routing-cutover` pipeline shipped 2026-07-06) on every request; LiteLLM now sits behind
+it, internal-only. The gateway collapses **decide →
 budget-steer → judge → record → serve-handoff** into a single in-process Rust decision (tiny-dancer
 FastGRNN + HNSW route cache + budget ledger + OTel) that **fronts** LiteLLM at `:4000`, making the
 **same decisions** at **< 5 ms** (heuristic) / **< 25 ms** (neural incl. embedding). It is **optional
@@ -58,7 +62,15 @@ profile — never a second bind.
 
 ---
 
-## 2. Request path — WITHOUT the gateway (today, the Node loop)
+## 2. Request path — WITHOUT the gateway (as of 2026-07-06: `route-gateway`, the Node loop, live)
+
+> **Corrected 2026-07-06** (`live-routing-cutover` pipeline, phases 0-8): this diagram previously
+> showed the agent calling `router.mjs`/`reflex.mjs`/`recorder.mjs` directly, with LiteLLM as the
+> host-facing `:4000` seam — that was the ASPIRATIONAL design when this doc was first written, not
+> what was actually running. It is corrected below to the ACTUAL live path: `scripts/gateway-server.mjs`
+> (`route-gateway`) is now the sole host-facing `:4000` seam; it calls `router.mjs`/`reflex.mjs`/
+> `recorder.mjs` internally and then forwards to LiteLLM, which is internal-only (no host port) as of
+> phase 0. See `docs/research/live-routing-gateway-rationale.md` for the full before/after.
 
 ```
           ┌─────────┐
@@ -67,8 +79,8 @@ profile — never a second bind.
                │  (1) request
                ▼
   ┌───────────────────────────────────────────────┐
-  │  NODE OVERLAY  (scripts/lib/*.mjs, per request)│   ◄── all JS, multi-hop
-  │                                                │
+  │  route-gateway  :4000  (scripts/gateway-server.mjs) │   ◄── the host-facing seam; calls the
+  │                                                │       Node overlay in-process, per request
   │   router.mjs ──reads── budget-snapshot.mjs     │   (2) decide tier
   │       │                                         │
   │       ▼                                         │
@@ -81,7 +93,7 @@ profile — never a second bind.
                                     │     │
                           (3)(5)    ▼     ▼  (extra gateway hop for the judge)
                         ┌───────────────────────────┐
-                        │   LiteLLM  :4000          │   serving substrate
+                        │   LiteLLM  (internal-only) │   serving substrate
                         │  aliases · budgets ·      │
                         │  failover · retries · OTel│
                         └───────────┬───────────────┘
@@ -90,7 +102,7 @@ profile — never a second bind.
                      │ ollama · vllm · frontier(cloud)│
                      └──────────────────────────────┘
 
-  hot path/request:  JS route  +  JS→LiteLLM  +  JS judge round-trip  +  JS embed/record
+  hot path/request:  route-gateway (in-process JS route + judge round-trip + embed/record) → LiteLLM
 ```
 
 ## 3. Request path — WITH the gateway (Path 4, the promoted loop)
@@ -112,7 +124,7 @@ profile — never a second bind.
                           │  (2) resolved tier
                           ▼
               ┌───────────────────────────┐
-              │   LiteLLM  :4000 (fronted)│   STAYS — provider budgets,
+              │   LiteLLM  (internal-only)│   STAYS — provider budgets,
               │   budgets · failover · OTel│   failover, serving
               └───────────┬───────────────┘
                           ▼
@@ -159,7 +171,9 @@ It is a **relocation of the decision loop into native code**, not a deletion of 
 | `bifrost` / `helicone` | Alternative `:4000` gateway variants (mutually exclusive) | peers of the ruvector-gateway variant |
 | `routellm` `:6060` | Optional MF router — the explicit 90/10 strong-model dial | orthogonal (an alternate decider) |
 
-**Layer 2 — Decision & learning overlay** (`scripts/lib/*.mjs`, Node — the loop the gateway promotes)
+**Layer 2 — Decision & learning overlay** (`scripts/lib/*.mjs`, Node — LIVE since 2026-07-06, called
+from `scripts/gateway-server.mjs` on every request; the loop this plan's Rust sidecar would promote
+from Node into native code, not from "not yet live" into live — that already happened)
 
 | Module | Responsibility |
 |---|---|
