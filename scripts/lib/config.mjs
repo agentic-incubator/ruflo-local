@@ -51,6 +51,14 @@ export function budgetConfig(env = process.env) {
   };
 }
 
+/** route-gateway surface — the host-facing seam (:4000) + which internal upstream it proxies to. */
+export function gatewayServerConfig(env = process.env) {
+  return {
+    port: num("GATEWAY_PORT", 4000, env),
+    upstream: str("GATEWAY_UPSTREAM_URL", "http://litellm:4000", env),
+  };
+}
+
 /** bench-gateway surface (MODEL / N). */
 export function benchConfig(env = process.env) {
   return {
