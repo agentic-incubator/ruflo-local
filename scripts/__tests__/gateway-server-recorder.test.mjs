@@ -17,69 +17,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createGatewayServer } from "../gateway-server.mjs";
 import { RoutingRecorder, promptHash } from "../lib/recorder.mjs";
-
-function listen(server) {
-  return new Promise((resolve) => server.listen(0, "127.0.0.1", () => resolve(server.address().port)));
-}
-
-function closeAll(...servers) {
-  return Promise.all(servers.map((s) => new Promise((resolve) => s.close(resolve))));
-}
-
-function request(port, path, opts = {}) {
-  return new Promise((resolve, reject) => {
-    const req = http.request(
-      { host: "127.0.0.1", port, path, method: opts.method ?? "GET", headers: opts.headers },
-      (res) => {
-        const chunks = [];
-        res.on("data", (chunk) => chunks.push(chunk));
-        res.on("end", () =>
-          resolve({ status: res.statusCode, headers: res.headers, body: Buffer.concat(chunks).toString() }),
-        );
-      },
-    );
-    req.on("error", reject);
-    if (opts.body) req.write(opts.body);
-    req.end();
-  });
-}
-
-/** A plain (non-scorable) chat-completions echo — no judge/escalation role needed. */
-function chatUpstream(answer = "an answer") {
-  return new Promise((resolve) => {
-    const server = http.createServer((req, res) => {
-      res.writeHead(200, { "content-type": "application/json" });
-      res.end(JSON.stringify({ choices: [{ message: { content: answer } }] }));
-    });
-    server.listen(0, "127.0.0.1", () => resolve({ server, port: server.address().port }));
-  });
-}
-
-/** Same three-role fake upstream as phase 2's tests (serving / judge / escalation calls). */
-function startReflexFakeUpstream({ servedAnswer = "local answer", judgeScore = 1.0, escalatedAnswer = "frontier answer" } = {}) {
-  const server = http.createServer((req, res) => {
-    const chunks = [];
-    req.on("data", (chunk) => chunks.push(chunk));
-    req.on("end", () => {
-      let body = {};
-      try {
-        body = JSON.parse(Buffer.concat(chunks).toString());
-      } catch {
-        // leave body as {}
-      }
-      const isJudgeCall = Array.isArray(body.messages) && body.messages.some((m) => m.role === "system");
-      res.writeHead(200, { "content-type": "application/json" });
-      if (isJudgeCall) {
-        res.end(JSON.stringify({ choices: [{ message: { content: JSON.stringify({ score: judgeScore }) } }] }));
-      } else if (body.model === "tier-frontier") {
-        res.end(JSON.stringify({ choices: [{ message: { content: escalatedAnswer } }], model: "tier-frontier" }));
-      } else {
-        res.end(JSON.stringify({ choices: [{ message: { content: servedAnswer } }], model: body.model }));
-      }
-    });
-  });
-  return { server };
-}
+import { listen, closeAll, request, chatUpstream, startReflexFakeUpstream } from "./test-harness.mjs";
 
 const DIM = 8;
 /** Deterministic distinct DIM-dim vector per text — never the real ruvllm model in tests. */

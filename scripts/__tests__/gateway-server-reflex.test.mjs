@@ -8,82 +8,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import http from "node:http";
-import { createGatewayServer } from "../gateway-server.mjs";
-
-// Phase 3 wires a REAL recorder by default (writing to .ruvector/routing-corpus.rvf via
-// a real embedder) — irrelevant to phase 2's reflex behavior and, left unstubbed, would
-// pollute the repo's real corpus file with test traffic on every run. gw() is
-// createGatewayServer() with that default recorder swapped for a no-op; the dedicated
-// recorder tests (gateway-server-recorder.test.mjs) inject their own.
-const NOOP_RECORD = async () => {};
-function gw(opts) {
-  return createGatewayServer({ recordFn: NOOP_RECORD, ...opts });
-}
-
-function listen(server) {
-  return new Promise((resolve) => server.listen(0, "127.0.0.1", () => resolve(server.address().port)));
-}
-
-function closeAll(...servers) {
-  return Promise.all(servers.map((s) => new Promise((resolve) => s.close(resolve))));
-}
-
-function request(port, path, opts = {}) {
-  return new Promise((resolve, reject) => {
-    const req = http.request(
-      { host: "127.0.0.1", port, path, method: opts.method ?? "GET", headers: opts.headers },
-      (res) => {
-        const chunks = [];
-        res.on("data", (chunk) => chunks.push(chunk));
-        res.on("end", () =>
-          resolve({ status: res.statusCode, headers: res.headers, body: Buffer.concat(chunks).toString() }),
-        );
-      },
-    );
-    req.on("error", reject);
-    if (opts.body) req.write(opts.body);
-    req.end();
-  });
-}
-
-/**
- * A fake upstream that plays THREE roles at once, distinguished by request shape —
- * exactly like the real litellm gateway is asked to by verify-escalate.mjs/reflex.mjs:
- *   1. The original serving call (whatever tier the client asked for).
- *   2. The judge call (verify-escalate.mjs's buildJudgeBody — a system + user message,
- *      asking for a {"score": N} verdict). Position-swap averages TWO of these per request.
- *   3. The escalation call (reflex.mjs's default escalate — a single user message,
- *      model === "tier-frontier", asking for a real answer instead of a score).
- * Records every request it receives so tests can assert on exact call counts.
- */
-function startReflexFakeUpstream({ servedAnswer = "local answer", judgeScore = 1.0, escalatedAnswer = "frontier answer" } = {}) {
-  const requests = [];
-  const server = http.createServer((req, res) => {
-    const chunks = [];
-    req.on("data", (chunk) => chunks.push(chunk));
-    req.on("end", () => {
-      const raw = Buffer.concat(chunks).toString();
-      let body = {};
-      try {
-        body = JSON.parse(raw);
-      } catch {
-        // non-JSON body (shouldn't happen in these tests) — leave body as {}
-      }
-      requests.push({ path: req.url, body });
-
-      const isJudgeCall = Array.isArray(body.messages) && body.messages.some((m) => m.role === "system");
-      res.writeHead(200, { "content-type": "application/json" });
-      if (isJudgeCall) {
-        res.end(JSON.stringify({ choices: [{ message: { content: JSON.stringify({ score: judgeScore }) } }] }));
-      } else if (body.model === "tier-frontier") {
-        res.end(JSON.stringify({ choices: [{ message: { content: escalatedAnswer } }], model: "tier-frontier" }));
-      } else {
-        res.end(JSON.stringify({ choices: [{ message: { content: servedAnswer } }], model: body.model }));
-      }
-    });
-  });
-  return { server, requests };
-}
+import { gw, listen, closeAll, request, startReflexFakeUpstream } from "./test-harness.mjs";
 
 test("escalates to the frontier answer when the judge scores the local answer low", async () => {
   const { server: upstream, requests } = startReflexFakeUpstream({ judgeScore: 0.0 }); // well below default threshold 0.6
@@ -132,7 +57,7 @@ test("propagates real process.env vars into reflex.mjs's env when no `env` optio
     };
     // No `env` option passed — createGatewayServer's opts.env is genuinely undefined,
     // exactly the real production shape.
-    const gateway = createGatewayServer({ recordFn: NOOP_RECORD, reflexFn, upstream: `http://127.0.0.1:${upstreamPort}` });
+    const gateway = gw({ reflexFn, upstream: `http://127.0.0.1:${upstreamPort}` });
     const gatewayPort = await listen(gateway);
 
     await request(gatewayPort, "/v1/chat/completions", {
