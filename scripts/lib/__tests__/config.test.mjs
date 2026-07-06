@@ -11,6 +11,7 @@ import {
   budgetConfig,
   benchConfig,
   regressionConfig,
+  otelConfig,
 } from "../config.mjs";
 
 test("str returns default when unset or blank, override otherwise", () => {
@@ -58,5 +59,12 @@ test("benchConfig and regressionConfig defaults", () => {
     frontierModel: "tier-frontier",
     margin: 0.2,
     threshold: 0.2,
+  });
+});
+
+test("otelConfig defaults to the shared collector endpoint litellm's own OTEL_EXPORTER already posts to, override via OTEL_ENDPOINT", () => {
+  assert.deepEqual(otelConfig({}), { endpoint: "http://otel-collector:4318/v1/traces" });
+  assert.deepEqual(otelConfig({ OTEL_ENDPOINT: "http://collector:4318/v1/traces" }), {
+    endpoint: "http://collector:4318/v1/traces",
   });
 });
