@@ -250,6 +250,14 @@ services:
       - GF_AUTH_ANONYMOUS_ENABLED=false
     volumes:
       - ./config/observability/grafana-datasources.yml:/etc/grafana/provisioning/datasources/datasources.yml:ro
+      # Phase 6: the routing-decisions dashboard (tier share, escalation rate, budget
+      # rungs, DRACO-growth proxy, judge-score buckets) — file-based provisioning only,
+      # mirroring the datasources mount above, so the dashboard survives `docker compose
+      # down -v`. The provisioning pointer and the dashboard JSONs mount at DIFFERENT
+      # paths (the pointer's own options.path) — mounting the dashboards dir directly
+      # onto /etc/grafana/provisioning/dashboards would shadow the pointer file itself.
+      - ./config/observability/grafana-dashboards-provisioning.yml:/etc/grafana/provisioning/dashboards/dashboards.yml:ro
+      - ./config/observability/dashboards:/etc/grafana/dashboards:ro
       - grafana_data:/var/lib/grafana
     restart: unless-stopped
 
