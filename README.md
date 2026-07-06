@@ -9,7 +9,7 @@ Send **~90% of your LLM traffic to open-weight models on your own hardware** and
 ## Quick start
 
 ```bash
-cp .env.example .env        # add keys; pick your gateway via COMPOSE_PROFILES + GATEWAY_UPSTREAM_URL (both — see Gateway Variants)
+cp .env.example .env        # add keys; default gateway is LiteLLM — to switch, use `make gateway-up PROFILE=<name>` (see Gateway Variants)
 make render                 # render gateway configs to YOUR hardware (Apple Silicon→MLX, else→GGUF)
                             #   non-Apple-Silicon: make render RUFLO_MODEL_VARIANT=gguf
 docker compose up -d        # default gateway (LiteLLM) + Ollama + Prometheus + Grafana

@@ -36,19 +36,25 @@ The shipped `.env` sets `COMPOSE_PROFILES=litellm`, so **`docker compose up -d` 
 > you switch profiles — it forwards to whatever `GATEWAY_UPSTREAM_URL` points at, which does NOT
 > follow `COMPOSE_PROFILES` automatically. Set both together, or `route-gateway` keeps forwarding
 > to the OLD upstream (which is no longer running) and every request 502s.
+>
+> `make gateway-up PROFILE=<name>` sets both for you from a single knob — use it instead of
+> hand-pairing the two vars below.
 
 ```bash
 # Default — LiteLLM (from the shipped .env):
 docker compose up -d
+# equivalently: make gateway-up            (PROFILE defaults to litellm)
 
-# Switch to Bifrost (litellm stops; bifrost starts internal-only on :8080; route-gateway
-# itself never restarts — point it at bifrost via GATEWAY_UPSTREAM_URL):
+# Switch to Bifrost (litellm stops; bifrost starts internal-only on :8080):
+make gateway-up PROFILE=bifrost
+# equivalent, if you're not using make — route-gateway itself never restarts,
+# so you must point it at bifrost via GATEWAY_UPSTREAM_URL yourself:
 COMPOSE_PROFILES=bifrost GATEWAY_UPSTREAM_URL=http://bifrost:8080 docker compose up -d --remove-orphans
 
 # Back to LiteLLM:
-COMPOSE_PROFILES=litellm GATEWAY_UPSTREAM_URL=http://litellm:4000 docker compose up -d --remove-orphans
+make gateway-up PROFILE=litellm
 ```
-Shared infra — Ollama, Prometheus, Grafana, the OTel collector — is **not** profiled, so it stays up across a switch. Add GPU/router overlays by combining profiles: `COMPOSE_PROFILES=litellm,gpu`.
+Shared infra — Ollama, Prometheus, Grafana, the OTel collector — is **not** profiled, so it stays up across a switch. Add GPU/router overlays by combining profiles: `COMPOSE_PROFILES=litellm,gpu` (the `gateway-up` target only covers the mutually-exclusive gateway choice, not overlays — combine those with the raw `COMPOSE_PROFILES=` form).
 
 ---
 
@@ -79,10 +85,10 @@ Bifrost (Go, [maximhq/bifrost](https://github.com/maximhq/bifrost)) is a µs-cla
 ### Benchmark the overhead
 Compare added gateway latency on your own hardware with the same local model:
 ```bash
-COMPOSE_PROFILES=litellm docker compose up -d && ./scripts/bench-gateway.sh   # baseline
-COMPOSE_PROFILES=bifrost docker compose up -d && ./scripts/bench-gateway.sh   # variant
+make gateway-up PROFILE=litellm && ./scripts/bench-gateway.sh   # baseline
+make gateway-up PROFILE=bifrost && ./scripts/bench-gateway.sh   # variant
 ```
-`scripts/bench-gateway.sh` reports p50/p95 over N `tier-fast` calls (local, ~$0). Read the overhead as the **delta** across variants on the same model — run it under each: `COMPOSE_PROFILES=helicone docker compose up -d && ./scripts/bench-gateway.sh`.
+`scripts/bench-gateway.sh` reports p50/p95 over N `tier-fast` calls (local, ~$0). Read the overhead as the **delta** across variants on the same model — run it under each: `make gateway-up PROFILE=helicone && ./scripts/bench-gateway.sh`.
 
 ---
 
