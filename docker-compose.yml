@@ -61,11 +61,16 @@ services:
   # (config/routing/router-policy.example.json must be mounted for its category
   # floors to resolve — without it every agentType silently floors to tier-fast).
   # Transparently fronts whichever of litellm/bifrost/helicone is the active profile;
-  # later phases wire reflex.mjs/recorder.mjs in here too.
+  # phase 2 wired reflex.mjs in, phase 3 wired recorder.mjs in.
   # litellm/bifrost/helicone no longer bind host :4000 — only route-gateway does,
   # uniformly across all three, so exactly one container ever claims that port.
+  # Phase 4: built from a glibc image (not the musl-based Alpine tag) so recorder.mjs's
+  # @ruvector/rvf + @ruvector/ruvllm native bindings resolve, and the corpus lives
+  # on a named volume so DRACO rows survive a container restart.
   route-gateway:
-    image: node:24-alpine
+    build:
+      context: .
+      dockerfile: config/gateways/route-gateway.Dockerfile
     container_name: route-gateway
     working_dir: /app
     ports:
@@ -73,6 +78,7 @@ services:
     volumes:
       - ./scripts:/app/scripts:ro
       - ./config:/app/config:ro
+      - route-gateway-corpus:/app/.ruvector
     environment:
       - GATEWAY_PORT=4000
       - GATEWAY_UPSTREAM_URL=${GATEWAY_UPSTREAM_URL:-http://litellm:4000}
@@ -243,3 +249,4 @@ volumes:
   litellm_pg:
   prom_data:
   grafana_data:
+  route-gateway-corpus:
