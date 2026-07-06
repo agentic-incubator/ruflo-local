@@ -205,8 +205,28 @@ phases:
     adrs:  []
     ddd:   []
 
-  # ── Correct the record: fix every doc that overclaimed runtime status ───────────────────────
+  # ── Refactor: eliminate test-harness duplication before the docs correction pass ────────────
+  # Inserted 2026-07-06 per a qe-code-complexity duplication/redundancy audit (operator request),
+  # run after phase 5 shipped. Deliberately placed AFTER phase 7 (so it cleans up every phase's
+  # accumulated test helpers, not just phases 0-5's) and BEFORE the old phase 8 (docs correction,
+  # renumbered to 9 below) — no point re-touching docs a second time after a later refactor.
   - id: 8
+    goal: "Eliminate the test-harness duplication that accumulated across phases 0-7's incremental gateway-server test files: listen()/closeAll()/request()/chatUpstream()/startReflexFakeUpstream()/gw() are each copy-pasted near-identically across scripts/__tests__/gateway-server*.test.mjs (qe-code-complexity audit, 2026-07-06: ~180 duplicated lines across 4 files — see .autopilot/runs/live-routing-cutover.jsonl for the full finding). Pure refactor — no behavior change, same tests, same assertions, just one shared source. The audit also flagged a low-impact, optional duplication (collectBody/collectResponseBody's shared 'settle-once' guard inside gateway-server.mjs itself) — explicitly OUT of scope; do not fold it in."
+    deliverables:
+      - "scripts/__tests__/test-harness.mjs — one shared module exporting listen(server), closeAll(...servers), request(port, path, opts) (always includes headers in the resolved result — the superset of every existing variant, so one implementation covers every current use), chatUpstream(answer), startReflexFakeUpstream({servedAnswer, judgeScore, escalatedAnswer, trackRequests}) (trackRequests parameterizes the one real variance — the recorder test's requests[] tracking), and gw(recordFn) (the NOOP-recorder createGatewayServer wrapper)."
+      - "scripts/__tests__/gateway-server.test.mjs, gateway-server-otel.test.mjs, gateway-server-reflex.test.mjs, gateway-server-recorder.test.mjs: each imports these helpers from test-harness.mjs instead of defining its own copy; zero change to any existing test's assertions or behavior."
+    definition_of_done:
+      - "cmd: node --test scripts/lib/__tests__/*.test.mjs scripts/__tests__/*.test.mjs  — the FULL suite still passes, same test count as immediately before this phase (no test deleted, skipped, or weakened to force a pass)"
+      - "cmd: grep -rn '^function \\(listen\\|closeAll\\|request\\|chatUpstream\\|startReflexFakeUpstream\\|gw\\)(' scripts/__tests__/*.test.mjs | wc -l  — must be 0 (all four files now import, none redefine)"
+      - 'grep: from "./test-harness.mjs" in scripts/__tests__/gateway-server.test.mjs scripts/__tests__/gateway-server-otel.test.mjs scripts/__tests__/gateway-server-reflex.test.mjs scripts/__tests__/gateway-server-recorder.test.mjs  — all four files actually import the shared module'
+      - "grep:absent: TODO|FIXME in scripts/__tests__/test-harness.mjs"
+    conventions: "Test-only refactor — scripts/gateway-server.mjs and every scripts/lib/*.mjs module are UNCHANGED (no production-code edits in this phase). Keep request()'s superset shape (always include headers) rather than trimming fields per-caller. Not a risk phase (test-only, zero production behavior change) — Tier 4 heavy passes do not apply regardless of accelerator availability."
+    depends_on: [7]
+    adrs:  []
+    ddd:   []
+
+  # ── Correct the record: fix every doc that overclaimed runtime status ───────────────────────
+  - id: 9
     goal: "Now that router.mjs/reflex.mjs/recorder.mjs actually run live, correct every doc and pipeline note that either understated it (their own STATUS headers, now stale) or previously OVERCLAIMED it before this plan shipped — so the docs finally match the code in both directions."
     deliverables:
       - "scripts/lib/router.mjs, reflex.mjs, recorder.mjs: update each STATUS header — no longer 'NOT in the live request path'; now 'live, called from scripts/gateway-server.mjs (see live-routing-gateway-rationale.md).'"
@@ -220,6 +240,6 @@ phases:
       - "grep: live-routing-cutover|gateway-server.mjs in docs/guide/reference/tiers-and-routing.md"
       - "prose: the .autopilot/pipeline.yml correction is an ADDENDUM (dated, explaining what was wrong and why), not a silent rewrite of the original phase-7 text — preserving the historical record of the mistake this whole audit started from."
     conventions: "This phase is documentation-only — no code changes. Its DoD is entirely grep/prose because its job is textual accuracy, not behavior. Do not soften the correction — state plainly that the prior text was wrong, per the audit that motivated this plan."
-    depends_on: [7]
+    depends_on: [8]
     adrs:  []
     ddd:   []
