@@ -262,6 +262,41 @@ test("leaves an explicit tier alias in `model` untouched and never calls route()
   }
 });
 
+test("recognizes a mis-cased/whitespace-varied explicit tier and never calls route() (privacy-pin canonicalization)", async () => {
+  // Confirmed exploit from Tier-3 review: an exact-string-only bypass check let
+  // "Tier-Private" (or " tier-private") fall through to agentType-based routing,
+  // silently reassigning the served tier to something router.mjs picked instead of
+  // staying pinned — the mechanism phase 2 turns into an actual off-box leak. Canonical
+  // matching (reflex.mjs's own canonicalTier) must catch every case/whitespace variant.
+  for (const [raw, canonical] of [
+    ["Tier-Private", "tier-private"],
+    [" tier-private", "tier-private"],
+    ["TIER-FAST", "tier-fast"],
+    ["tier-heavy ", "tier-heavy"],
+  ]) {
+    const { server: upstream, port: upstreamPort } = await echoUpstream();
+    let called = false;
+    const routeFn = async () => {
+      called = true;
+      return { tier: "tier-frontier" };
+    };
+    const gateway = createGatewayServer({ upstream: `http://127.0.0.1:${upstreamPort}`, routeFn });
+    const gatewayPort = await listen(gateway);
+    const requestBody = JSON.stringify({ model: raw, metadata: { agentType: "researcher" }, messages: [] });
+
+    const res = await request(gatewayPort, "/v1/chat/completions", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: requestBody,
+    });
+
+    assert.equal(await receivedModel(res), canonical, `"${raw}" must be recognized as ${canonical} and forwarded canonicalized`);
+    assert.equal(called, false, `route() must never be called for "${raw}" (an explicit tier in disguise)`);
+
+    await closeAll(gateway, upstream);
+  }
+});
+
 test("fails open (forwards the original model) when route() throws", async () => {
   const { server: upstream, port: upstreamPort } = await echoUpstream();
   const routeFn = async () => {
