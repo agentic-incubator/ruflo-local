@@ -1,6 +1,10 @@
 // =============================================================================
 // challenger.mjs — run the trained per-question router in SHADOW alongside the champion.
 //
+// STATUS: reference/overlay code — runs in unit tests + offline/shadow tooling, NOT in the
+// live request path (live traffic is served by the gateway / LiteLLM config). See
+// docs/guide/reference/architecture-rfc.md (Path 2).
+//
 // This is the router-parallel-recorder pattern: for every request the CHAMPION serves
 // (its tier is what actually runs), while the challenger (the KRR TrainedRouter) computes
 // the tier it WOULD have picked — recorded, never served. The challenger cannot affect

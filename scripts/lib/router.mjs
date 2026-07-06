@@ -3,6 +3,10 @@
 // ruflo route(), map that agent to its per-agent-type tier FLOOR, then let the budget
 // snapshot STEER (not just alert).
 //
+// STATUS: reference/overlay code — runs in unit tests + offline/shadow tooling, NOT in the
+// live request path (live traffic is served by the gateway / LiteLLM config). Import route()
+// into your router to make it live. See docs/guide/reference/architecture-rfc.md (Path 2).
+//
 // Grounded in ruflo's real behavior: `ruflo route <task>` is a Q-learning AGENT router
 // (it returns Architect / Coder / Reviewer / …), NOT a model-tier router. So the product
 // wiring is: ruflo picks the agent/category → config/routing/router-policy.example.json

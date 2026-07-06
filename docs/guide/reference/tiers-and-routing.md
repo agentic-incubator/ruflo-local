@@ -14,7 +14,7 @@ The gateway config defines four **aliases**. Clients never name real models — 
 |---|---|---|
 | `tier-fast` | local MoE `Qwen3.6-35B-A3B` (Ollama) | Default workhorse — the "90%" |
 | `tier-heavy` | local dense `Qwen3.6-27B` (Ollama, optionally + vLLM under the same alias) | Harder tasks that still stay on-box |
-| `tier-frontier` | Claude Opus → GPT → Gemini (three deployments, one alias); optionally add hosted open-weight leaders | The "10%": budget-capped, auto-failover between providers |
+| `tier-frontier` | Claude Opus · GPT · Gemini (three deployments, one alias; load-balanced with budget-aware failover); optionally add hosted open-weight leaders | The "10%": budget-capped, auto-failover between providers |
 | `tier-private` | local dense `Qwen3.6-27B`, **no fallback chain** | Structurally cannot leave your machine |
 
 > [!NOTE]
@@ -33,7 +33,7 @@ Each tier has a **default locality** — where it physically runs. `tier-fast`, 
 ```
 
 > [!IMPORTANT]
-> **Per-request locality is a *runtime* concern, not a schema flip.** A single request can demand local-only handling regardless of which tier would normally serve it. That override lives in the router, not this config: `route({ pinnedPrivate: true })` in [`scripts/lib/router.mjs`](../../../scripts/lib/router.mjs) resolves the request to **`tier-private`** — a local-only gateway alias with **no fallback chain** — and it is **never** budget-steered or escalated off-box (the same pin the reflex path in [`scripts/lib/reflex.mjs`](../../../scripts/lib/reflex.mjs) refuses to escalate). `tier-private` is deliberately **absent** from the `ruflo-tiers.json` alts map precisely so no edit there can ever weaken it. Tiers declare a *default* locality; a request declares its *actual* one.
+> **Per-request locality is a *runtime* concern, not a schema flip.** A single request can demand local-only handling regardless of which tier would normally serve it. That override is enforced **live by the gateway**: **`tier-private`** is a local-only alias with **no fallback chain**, so any request that asks for it is **never** budget-steered or escalated off-box — the guarantee is the alias itself. The routing overlay mirrors the same intent — `route({ pinnedPrivate: true })` in [`scripts/lib/router.mjs`](../../../scripts/lib/router.mjs) resolves to `tier-private`, and the reflex path in [`scripts/lib/reflex.mjs`](../../../scripts/lib/reflex.mjs) refuses to escalate it — but that overlay is reference code, not yet wired into the live request path (see its module header). On live traffic, the gateway alias is what holds the pin. `tier-private` is deliberately **absent** from the `ruflo-tiers.json` alts map precisely so no edit there can ever weaken it. Tiers declare a *default* locality; a request declares its *actual* one.
 
 **Forward-compatible, non-breaking.** The `locality` field and the `_meta.schema_version: 2` bump are **additive**: ruflo and LiteLLM read only the `tiers` map shape (which is unchanged) and ignore `_meta` plus any extra per-tier keys, so both v1 and v2 files are consumed identically. The invariant check accepts `schema_version ∈ {1, 2}` — there is no breaking migration. A *future* full v2 (materialized only when a per-question learned router is actually promoted — see [Champion/challenger promotion](limitations-and-mitigations.md)) would extend this same shape to carry per-request locality *directives* in the routing decision; this file only **declares the capability and its defaults** today, so nothing downstream has to change until that promotion fires.
 
@@ -76,7 +76,9 @@ Three distinct safety nets stack here:
 
 ## 💵 Budgets that actually block
 
-Each frontier deployment carries `max_budget` + `budget_duration` (e.g. $3/day for Claude). When a deployment crosses its budget, the gateway stops sending to it for the rest of the period — and because `tier-frontier` has three deployments, exhausting Claude's budget fails over to GPT, then Gemini, then (only when all are exhausted) errors. Spend state lives in Postgres and survives restarts.
+Each frontier deployment carries `max_budget` + `budget_duration` (e.g. $3/day for Claude). When a deployment crosses its budget, the gateway stops sending to it for the rest of the period — and because `tier-frontier` has three deployments, exhausting one just removes it from the pool, so traffic continues on the remaining providers until all three are exhausted, then errors. Spend state lives in Postgres and survives restarts.
+
+> **On ordering:** the default LiteLLM strategy is `routing_strategy: simple-shuffle`, which **load-balances** across the healthy, in-budget deployments rather than enforcing a strict Claude→GPT→Gemini priority. A deterministic ordered chain is Bifrost's behavior (explicit `fallbacks` list); Helicone routes by `model-latency`. Pick the gateway whose ordering semantics you want — see [Gateway Variants](gateway-variants.md).
 
 Rate caps (`rpm` / `tpm`) sit alongside as burst protection — agentic tools can fire 10–20k-token requests in quick succession, and token-per-minute caps catch what request-per-minute caps miss.
 

@@ -16,8 +16,13 @@ ruflo swarm init --topology hierarchical --max-agents 8 --strategy specialized
 
 ## Build & Test
 
+No build step or `package.json` scripts — the JS is plain ESM run directly, and
+tests use Node's built-in runner:
+
 ```bash
-npm run build && npm test
+node --test 'scripts/lib/__tests__/*.test.mjs'   # unit tests (191) for the routing/promotion overlay
+make render                                       # regenerate gateway configs from templates (before `docker compose up`)
+./smoke-test.sh                                   # end-to-end: tiers answer, fall-through, privacy pin, metrics
 ```
 
 ## Agentic QE v3

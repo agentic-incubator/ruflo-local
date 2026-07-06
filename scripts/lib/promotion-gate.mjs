@@ -1,6 +1,10 @@
 // =============================================================================
 // promotion-gate.mjs — evidence-gated champion/challenger promotion with auto-rollback.
 //
+// STATUS: reference/overlay code — runs in unit tests + offline/shadow tooling, NOT in the
+// live request path (live traffic is served by the gateway / LiteLLM config). See
+// docs/guide/reference/architecture-rfc.md (Path 2).
+//
 // The challenger only serves if it is BETTER, not just CHEAPER. A raw quality-per-dollar
 // ratio is unsafe: with ~$0 local tiers, cost dominates and a garbage-quality free router
 // would "win" purely for being free (and could never be rolled back). So promotion requires

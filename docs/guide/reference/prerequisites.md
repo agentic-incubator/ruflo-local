@@ -8,7 +8,7 @@
 
 ## ✅ Required — everyone
 
-You need these three for any working install.
+You need these for any working install.
 
 ### 1. Docker + Docker Compose
 - **What / why:** runs the whole stack (gateway, Ollama, Prometheus, Grafana) as containers. Everything here is `docker compose`.
@@ -21,18 +21,19 @@ You need these three for any working install.
 ### 2. Ollama (local inference)
 - **What / why:** serves the local models behind `tier-fast` / `tier-heavy` / `tier-private` — the ~90% that never leaves your box.
 - **Install:** [ollama.com/download](https://ollama.com/download). On macOS/Windows run it **on the host** (Docker can't reach Apple/consumer GPUs) and start the stack with `docker compose up --scale ollama=0`; on Linux the bundled `ollama` container works.
-- **Pull the models** your tiers reference (see [Hardware & Models](hardware-and-models.md)):
+- **Pull the models** your tiers reference. `tier-fast` uses the **same GGUF tag on all
+  hardware**; only `tier-heavy` / `tier-private` differ — the **MLX** build on Apple Silicon
+  (same weights, Apple's MLX engine for better throughput), the plain build elsewhere. See
+  [Hardware & Models](hardware-and-models.md).
   ```bash
-  ollama pull qwen3.6:35b-a3b-q4_K_M       # tier-fast (MoE ~3B active, ~20 GB)
-  ollama pull qwen3.6:27b                   # tier-heavy / tier-private (dense ~17 GB)
+  ollama pull qwen3.6:35b-a3b-q4_K_M       # tier-fast — all hardware (MoE ~3B active, ~20 GB)
+
+  # tier-heavy / tier-private — pull ONE, matching your render variant (see §3):
+  ollama pull qwen3.6:27b-mlx              # 🍎 Apple Silicon — MLX build (~20 GB); the auto-detected default
+  ollama pull qwen3.6:27b                  # everyone else — plain GGUF build (~17 GB)
   ```
-- **🍎 Apple Silicon (macOS):** prefer the **MLX** builds — same weights, Apple's MLX
-  engine for better throughput. Pull these instead and point the tier's `model:` at them:
-  ```bash
-  ollama pull qwen3.6:27b-mlx               # tier-heavy / tier-private on macOS (~20 GB)
-  ollama pull qwen3.6:35b-mlx               # tier-fast on macOS (MoE ~3B active, ~22 GB)
-  ```
-  Then set the matching tier in `config/gateways/litellm-config.yaml` (e.g. `ollama_chat/qwen3.6:27b-mlx`).
+  You do **not** hand-edit `config/gateways/litellm-config.yaml` for this — `make render`
+  (§3) writes the hardware-correct tag into the gateway configs from `config/model-sets.json`.
 - **Verify:**
   ```bash
   ollama --version && ollama list
@@ -43,12 +44,23 @@ You need these three for any working install.
 - **Configure:**
   ```bash
   cp .env.example .env         # then edit: add frontier keys, set COMPOSE_PROFILES, master key
+  make render                  # render gateway configs to your hardware (needs Node.js, see §4);
+                               #   non-Apple-Silicon: make render RUFLO_MODEL_VARIANT=gguf
   docker compose up -d         # brings up the default (LiteLLM) gateway + shared infra
   ```
   Set frontier API keys (`ANTHROPIC_API_KEY` / `OPENAI_API_KEY` / `GEMINI_API_KEY`) for the `tier-frontier` lane, and pick your gateway with `COMPOSE_PROFILES` (see [Gateway Variants](gateway-variants.md)). Frontier keys are optional if you only ever run local tiers.
+- **Why `make render` is not optional:** the committed gateway configs are **generated** from `config/templates/*.tmpl`. `make render` auto-detects your arch (Apple Silicon → MLX, else → GGUF) and stamps the matching local model tags into `config/gateways/*`. Skip it on a non-Apple-Silicon host and `tier-heavy`/`tier-private` point at a `-mlx` tag that host never pulled → those tiers fail. Re-running is idempotent.
 - **Verify:**
   ```bash
   curl -sS http://localhost:4000/health/liveliness && ./smoke-test.sh
+  ```
+  `./smoke-test.sh` auto-sources `.env`, so it uses the same `LITELLM_MASTER_KEY` the gateway started with.
+
+### 4. CLI tools — Node.js, `python3`, `curl`
+- **What / why:** `make render` regenerates the gateway configs and needs **Node.js ≥ 18** (ESM + `node --test`). `./smoke-test.sh` — the verification step in every guide — parses gateway JSON with **`python3`** and calls the gateway with **`curl`**. All three are hard dependencies of the Required flow above.
+- **Verify:**
+  ```bash
+  node --version && python3 --version && curl --version
   ```
 
 ---
@@ -111,4 +123,4 @@ Only needed if you want the [router mitigations](limitations-and-mitigations.md#
 ---
 
 > [!TIP]
-> Minimum viable install = **Docker + Ollama + `cp .env.example .env` + `docker compose up -d`**. Everything below the Required tier is opt-in — add it when you reach for the feature it unlocks.
+> Minimum viable install = **Docker + Ollama + Node.js + `cp .env.example .env` + `make render` + `docker compose up -d`**. Everything below the Required tier is opt-in — add it when you reach for the feature it unlocks.

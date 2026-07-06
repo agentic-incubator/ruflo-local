@@ -37,9 +37,10 @@ neural router + Thompson bandit), not a second upstream picker.
 (`metaharness-and-ruflo-local.md:186-202`). One brain keeps the learning signal clean and
 uses what ruflo already ships. Metaharness composition stays a **deferred option** (see
 Deferred), not the starting architecture.
-**Prerequisite:** reconcile the ruflo version pin — this repo pins `ruflo@3.5.18`
-(`.claude/settings.json`), but the native training path fix (ruflo #2549) landed in **3.18.1**.
-Step zero is bumping that pin, or the fixed native path isn't in the build we invoke.
+**Prerequisite (resolved):** the native training-path fix (ruflo #2549) landed in **3.18.1**,
+so the pin had to clear that floor. **Done in phase 10** — the pin was reconciled to
+`ruflo@3.25.1` (`.claude/settings.json`; see the Phase 10 decision log below and
+`ecosystem-audit-2026-07.md`). The `3.5.18` figure that previously appeared here was stale.
 
 ### D2 — Node/`.mjs` runtime for the reward/verify/budget logic
 **Decision:** rewrite the four bash scripts (`verify-escalate.sh`, `budget-snapshot.sh`,
@@ -89,6 +90,13 @@ we want per-request locality control.
 Per-question routing among the existing four aliases also works on v1; only finer per-request
 locality *requires* v2. So the v1→v2 migration rides along with the coarse→fine promotion —
 not a hard upfront prerequisite.
+
+> **Update (as shipped):** `config/routing/ruflo-tiers.json` is now `schema_version: 2`. In
+> practice v2 was re-scoped to **additive, non-breaking** metadata (a per-tier `locality`
+> field — see `ecosystem-audit-2026-07.md` "Option A") and adopted **decoupled from the
+> promotion gate**, which — per the metaharness offline eval — never fired ("keep"
+> recommendation). So v2 landed without the promotion trigger this decision made it
+> conditional on.
 
 ## Phasing
 
