@@ -82,6 +82,10 @@ services:
     environment:
       - GATEWAY_PORT=4000
       - GATEWAY_UPSTREAM_URL=${GATEWAY_UPSTREAM_URL:-http://litellm:4000}
+      # Phase 5: route-gateway's own OTel span per decision (ruflo.route.* attributes) —
+      # the SAME collector endpoint litellm's OTEL_EXPORTER=otlp_http already posts
+      # gen_ai.* spans to, so both flow through one shared traces pipeline.
+      - OTEL_ENDPOINT=${OTEL_ENDPOINT:-http://otel-collector:4318/v1/traces}
     command: ["node", "/app/scripts/gateway-server.mjs"]
     restart: unless-stopped
 

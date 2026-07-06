@@ -66,6 +66,14 @@ export function routerPolicyConfig(env = process.env) {
   };
 }
 
+/** OTLP/HTTP trace endpoint — the SAME collector seam litellm-config.yaml's own
+ *  OTEL_EXPORTER=otlp_http callback already posts gen_ai.* spans to. */
+export function otelConfig(env = process.env) {
+  return {
+    endpoint: str("OTEL_ENDPOINT", "http://otel-collector:4318/v1/traces", env),
+  };
+}
+
 /** bench-gateway surface (MODEL / N). */
 export function benchConfig(env = process.env) {
   return {

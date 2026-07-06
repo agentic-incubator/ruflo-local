@@ -18,7 +18,11 @@
 // embedder, corrupt corpus, whatever) is swallowed exactly like a reflex/router
 // failure, never affecting the response already sent. router.mjs, reflex.mjs, and
 // recorder.mjs's own logic is never modified, only called, for the first time, from
-// live code.
+// live code. Phase 5 emits one OTel span per served decision, carrying
+// ruflo.route.{tier,floor,category,budget_rung,escalated,judge_score} attributes,
+// exported to the SAME otel-collector :4318/v1/traces endpoint litellm's own gen_ai.*
+// spans already flow through (otel-span.mjs) — best-effort, never affecting the
+// response, exactly like the recorder.
 //
 // GATEWAY_UPSTREAM_URL follows the existing OLLAMA_API_BASE/VLLM_API_BASE env-override
 // convention (config.mjs): default http://litellm:4000, override in .env when
@@ -36,6 +40,7 @@ import { reflex as reflexAnswer, isScorable, canonicalTier, escalationTier } fro
 import { RoutingRecorder, outcomeFromReflex } from "./lib/recorder.mjs";
 import { DEFAULT_CANDIDATES } from "./lib/train-router.mjs";
 import { GatewayClient } from "./lib/gateway-client.mjs";
+import { otelSpanExporter } from "./lib/otel-span.mjs";
 
 const MODULE_DIR = path.dirname(fileURLToPath(import.meta.url));
 const EXPLICIT_TIERS = new Set([...TIER_LADDER, "tier-private"]);
@@ -99,11 +104,18 @@ function createDefaultRecordFn(env) {
  * nothing: there is no real decision to log. Any recorder failure (no real embedder
  * under RUFLO_REQUIRE_REAL_EMBEDDINGS, a corrupt corpus, whatever) is swallowed here —
  * exactly like a reflex/router failure, it must never surface to an already-sent response.
+ * The phase-5 OTel span fires from the SAME choke point, for the SAME reason: any
+ * response-termination path that skips this call would silently drop that decision from
+ * telemetry too, the identical blind spot phase 3 found for the DRACO recorder.
  *
  * `cost`, when passed explicitly, overrides the usage-derived estimate — needed for an
  * escalated decision, whose real cost is the SUM of the local tier's own usage plus the
  * separately-billed escalation call's usage (estimateCost(tier, usage) alone can only
  * ever see one tier's usage at a time).
+ *
+ * `floor`/`budgetRung` are only known when router.mjs actually ran (an agentType-routed
+ * request) — undefined for an explicit-tier/bypass request, in which case the span
+ * simply omits those two attributes rather than emitting a bogus value.
  *
  * A response that never reaches 'finish' (the client vanished before headers, or `res`
  * was destroyed/ended by an error handler before this call) still represents a REAL
@@ -111,19 +123,35 @@ function createDefaultRecordFn(env) {
  * silently dropped — so an already-settled `res` fires immediately instead of waiting
  * on an event that will never arrive.
  */
-function recordServed(res, recordFn, { category, tier, prompt, requestStart, judgeScore = null, escalated = false, success, usage, cost }) {
+function recordServed(res, recordFn, spanFn, { category, tier, prompt, requestStart, requestStartWall, judgeScore = null, escalated = false, success, usage, cost, floor, budgetRung }) {
   if (tier === undefined) return;
+  const latency = performance.now() - requestStart;
   const decision = {
     prompt,
     category,
     tier,
     judge_score: judgeScore,
     cost: cost ?? estimateCost(tier, usage),
-    latency: performance.now() - requestStart,
+    latency,
     escalated,
     success,
   };
-  const fire = () => { void recordFn(decision).catch(() => {}); };
+  const fire = () => {
+    void recordFn(decision).catch(() => {});
+    void spanFn({
+      name: "gateway.route",
+      startTimeMs: requestStartWall,
+      endTimeMs: requestStartWall + latency,
+      attributes: {
+        "ruflo.route.tier": tier,
+        "ruflo.route.floor": floor,
+        "ruflo.route.category": category,
+        "ruflo.route.budget_rung": budgetRung,
+        "ruflo.route.escalated": escalated,
+        "ruflo.route.judge_score": judgeScore,
+      },
+    }).catch(() => {});
+  };
   if (res.writableFinished || res.destroyed) {
     fire();
   } else {
@@ -134,10 +162,10 @@ function recordServed(res, recordFn, { category, tier, prompt, requestStart, jud
 /** Writes the response, then records the decision — the one pairing every buffered
  *  response-handling branch needs, so a future field addition touches recordFields
  *  in one place per branch instead of the write/record sequencing itself. */
-function respondAndRecord(res, { statusCode, statusMessage, headers, body }, recordFn, recordFields) {
+function respondAndRecord(res, { statusCode, statusMessage, headers, body }, recordFn, spanFn, recordFields) {
   res.writeHead(statusCode, statusMessage, headers);
   res.end(body);
-  recordServed(res, recordFn, recordFields);
+  recordServed(res, recordFn, spanFn, recordFields);
 }
 
 /**
@@ -203,7 +231,9 @@ function lastMessageContent(parsed) {
  * Always returns the SERVED tier (whatever ends up in `model`, routed or not), the
  * prompt text, and the recordable category, so the response side can decide
  * reflex-eligibility and record a DRACO row without re-parsing.
- * @returns {Promise<{body:Buffer, servedTier:string|undefined, prompt:string, streaming:boolean, category:string}>}
+ * @returns {Promise<{body:Buffer, servedTier:string|undefined, prompt:string, streaming:boolean, category:string, floor?:string, budgetRung?:string}>}
+ * floor/budgetRung are only set when router.mjs actually ran — undefined for an
+ * explicit-tier/bypass request or an unrouted (no agentType) forward.
  */
 async function prepareRequest(bodyBuffer, { routeFn, policy, env, upstream }) {
   let parsed;
@@ -255,7 +285,13 @@ async function prepareRequest(bodyBuffer, { routeFn, policy, env, upstream }) {
     // same proxy instead of reaching the real gateway it needs to read.
     const decision = await routeFn({ agentType, policy, env: { ...env, GW: upstream } });
     parsed.model = decision.tier;
-    return { body: Buffer.from(JSON.stringify(parsed), "utf8"), servedTier: decision.tier, prompt, streaming, category };
+    return {
+      body: Buffer.from(JSON.stringify(parsed), "utf8"),
+      servedTier: decision.tier,
+      prompt, streaming, category,
+      floor: decision.floor,
+      budgetRung: decision.budget_rung,
+    };
   } catch {
     return { body: bodyBuffer, servedTier: originalModel, prompt, streaming, category }; // router.mjs threw — fail OPEN
   }
@@ -308,6 +344,7 @@ export function createGatewayServer(opts = {}) {
   const routeFn = opts.routeFn ?? routeRequest;
   const reflexFn = opts.reflexFn ?? reflexAnswer;
   const recordFn = opts.recordFn ?? createDefaultRecordFn(opts.env);
+  const spanFn = opts.spanFn ?? otelSpanExporter(opts.env);
 
   return http.createServer(async (req, res) => {
     // Guards res's WHOLE lifecycle from the first line — a client can disconnect during
@@ -315,12 +352,15 @@ export function createGatewayServer(opts = {}) {
     // either way an unhandled 'error' would crash the whole always-on process.
     res.on("error", () => {});
     const requestStart = performance.now();
+    const requestStartWall = Date.now(); // wall-clock anchor for the OTel span's timestamps; requestStart (above) is monotonic and only ever used for the latency delta
 
     let outBody = null;
     let servedTier;
     let prompt = "";
     let streaming = false;
     let category = "unrouted";
+    let floor;
+    let budgetRung;
     if (hasBody(req.method)) {
       let bodyBuffer;
       try {
@@ -342,6 +382,8 @@ export function createGatewayServer(opts = {}) {
       prompt = prepared.prompt;
       streaming = prepared.streaming;
       category = prepared.category;
+      floor = prepared.floor;
+      budgetRung = prepared.budgetRung;
     }
 
     const headers = { ...req.headers, host: upstream.host };
@@ -377,8 +419,8 @@ export function createGatewayServer(opts = {}) {
         if (!bufferable) {
           res.writeHead(proxyRes.statusCode, proxyRes.statusMessage, proxyRes.headers);
           proxyRes.pipe(res);
-          recordServed(res, recordFn, {
-            category, tier: servedTier, prompt, requestStart,
+          recordServed(res, recordFn, spanFn, {
+            category, tier: servedTier, prompt, requestStart, requestStartWall, floor, budgetRung,
             success: proxyRes.statusCode < 400,
           });
           return;
@@ -395,7 +437,8 @@ export function createGatewayServer(opts = {}) {
               res,
               { statusCode: proxyRes.statusCode, statusMessage: proxyRes.statusMessage, headers: proxyRes.headers, body: responseBuffer },
               recordFn,
-              { category, tier: servedTier, prompt, requestStart, success: proxyRes.statusCode < 400, usage },
+              spanFn,
+              { category, tier: servedTier, prompt, requestStart, requestStartWall, floor, budgetRung, success: proxyRes.statusCode < 400, usage },
             );
 
             let parsed;
@@ -466,7 +509,8 @@ export function createGatewayServer(opts = {}) {
               res,
               { statusCode: proxyRes.statusCode, statusMessage: proxyRes.statusMessage, headers: finalHeaders, body: finalBody },
               recordFn,
-              { category, tier: servedTier, prompt, requestStart, judgeScore: verdictResult.verdict?.score ?? null, escalated, success, cost },
+              spanFn,
+              { category, tier: servedTier, prompt, requestStart, requestStartWall, floor, budgetRung, judgeScore: verdictResult.verdict?.score ?? null, escalated, success, cost },
             );
           })
           .catch(() => {
@@ -479,7 +523,7 @@ export function createGatewayServer(opts = {}) {
               res.writeHead(502, { "content-type": "application/json" });
               res.end(JSON.stringify({ error: "bad_gateway", message: "response buffering failed" }));
             }
-            recordServed(res, recordFn, { category, tier: servedTier, prompt, requestStart, success: false });
+            recordServed(res, recordFn, spanFn, { category, tier: servedTier, prompt, requestStart, requestStartWall, floor, budgetRung, success: false });
           });
       },
     );
@@ -509,7 +553,7 @@ export function createGatewayServer(opts = {}) {
         }
         res.end(JSON.stringify({ error: "bad_gateway", message: err.message }));
       }
-      recordServed(res, recordFn, { category, tier: servedTier, prompt, requestStart, success: false });
+      recordServed(res, recordFn, spanFn, { category, tier: servedTier, prompt, requestStart, requestStartWall, floor, budgetRung, success: false });
     });
 
     if (outBody !== null) {
