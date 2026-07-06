@@ -213,8 +213,14 @@ services:
   # OTel Collector — receives GenAI spans (gen_ai.* conventions) from the gateway
   # and exposes span-derived metrics on :8889 for Prometheus (limitations §7).
   # Image tag pinned deliberately (the GenAI conventions are still evolving).
+  # 0.116.0's published arm64 image is broken (`exec /otelcol-contrib: no such
+  # file or directory` on container start — reproduces via a bare `docker run
+  # --version`, independent of this repo's config/volumes). 0.155.0 verified
+  # working: builds/runs on arm64, and correctly ingests this repo's actual
+  # collector config (spanmetrics dimensions + debug exporter both confirmed
+  # live during the live-routing-cutover pipeline's phase-5 verification).
   otel-collector:
-    image: otel/opentelemetry-collector-contrib:0.116.0
+    image: otel/opentelemetry-collector-contrib:0.155.0
     container_name: otel-collector
     volumes:
       - ./config/observability/otel-collector-config.yaml:/etc/otelcol-contrib/config.yaml:ro
