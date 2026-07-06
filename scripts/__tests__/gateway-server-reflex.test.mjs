@@ -106,6 +106,50 @@ test("escalates to the frontier answer when the judge scores the local answer lo
   await closeAll(gateway, upstream);
 });
 
+// Regression (phase 7): `const reflexEnv = { ...opts.env, GW: upstream.origin };` — when
+// no `env` option is passed to createGatewayServer at all (the real production shape,
+// isMain()'s bare createGatewayServer()), `opts.env` is undefined, and `{...undefined}`
+// evaluates to `{}` — a DEFINED (if empty) object, which defeats every downstream
+// `= process.env` default parameter (gatewayConfig's LITELLM_MASTER_KEY among them),
+// since default params only trigger on an undefined argument, never a merely-empty one.
+// This silently sent every real judge/escalation call out with config.mjs's hardcoded
+// "sk-local-master" fallback instead of the real key since phase 2 shipped — invisible
+// until a live escalation drill against real litellm actually needed the real key.
+test("propagates real process.env vars into reflex.mjs's env when no `env` option is passed at all", async () => {
+  process.env.RUFLO_TEST_ENV_PROPAGATION_MARKER = "present";
+  try {
+    const { server: upstream, port: upstreamPort } = await (async () => {
+      const server = http.createServer((req, res) => {
+        res.writeHead(200, { "content-type": "application/json" });
+        res.end(JSON.stringify({ choices: [{ message: { content: "an answer" } }] }));
+      });
+      return { server, port: await listen(server) };
+    })();
+    let capturedEnv = null;
+    const reflexFn = async ({ answer, env }) => {
+      capturedEnv = env;
+      return { answer, escalated: false, verdict: null };
+    };
+    // No `env` option passed — createGatewayServer's opts.env is genuinely undefined,
+    // exactly the real production shape.
+    const gateway = createGatewayServer({ recordFn: NOOP_RECORD, reflexFn, upstream: `http://127.0.0.1:${upstreamPort}` });
+    const gatewayPort = await listen(gateway);
+
+    await request(gatewayPort, "/v1/chat/completions", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ model: "tier-fast", messages: [{ role: "user", content: "hello" }] }),
+    });
+
+    assert.ok(capturedEnv, "reflexFn should have been called");
+    assert.equal(capturedEnv.RUFLO_TEST_ENV_PROPAGATION_MARKER, "present");
+
+    await closeAll(gateway, upstream);
+  } finally {
+    delete process.env.RUFLO_TEST_ENV_PROPAGATION_MARKER;
+  }
+});
+
 test("keeps the local answer when the judge scores it high", async () => {
   const { server: upstream, requests } = startReflexFakeUpstream({ judgeScore: 1.0 }); // well above default threshold 0.6
   const upstreamPort = await listen(upstream);

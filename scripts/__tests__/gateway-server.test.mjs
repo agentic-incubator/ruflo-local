@@ -247,6 +247,43 @@ test("rewrites `model` to the router-resolved tier when metadata.agentType is pr
   await closeAll(gateway, upstream);
 });
 
+// Regression (phase 7): `env: { ...env, GW: upstream }` — when no `env` option is passed
+// to createGatewayServer at all (the real production call, `isMain()`'s bare
+// createGatewayServer()), `env` here is undefined, and `{...undefined}` evaluates to `{}`,
+// a DEFINED (if empty) object — which defeats every downstream `= process.env` default
+// parameter (budgetConfig's among them), since default params only trigger on an
+// undefined argument, never a merely-empty one. This silently dropped every real env var
+// except GW from router.mjs's budget-snapshot call since it shipped, invisible until a
+// live escalation drill actually needed a real custom env value to reach litellm.
+test("propagates real process.env vars into route()'s env when no `env` option is passed at all", async () => {
+  process.env.RUFLO_TEST_ENV_PROPAGATION_MARKER = "present";
+  try {
+    const { server: upstream, port: upstreamPort } = await echoUpstream();
+    let capturedEnv = null;
+    const routeFn = async ({ env }) => {
+      capturedEnv = env;
+      return { tier: "tier-heavy" };
+    };
+    // No `env` option passed — createGatewayServer's opts.env is genuinely undefined,
+    // exactly the real production shape (isMain() calls createGatewayServer() bare).
+    const gateway = gw({ upstream: `http://127.0.0.1:${upstreamPort}`, routeFn });
+    const gatewayPort = await listen(gateway);
+
+    await request(gatewayPort, "/v1/chat/completions", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ model: "auto", metadata: { agentType: "reviewer" }, messages: [] }),
+    });
+
+    assert.ok(capturedEnv, "routeFn should have been called");
+    assert.equal(capturedEnv.RUFLO_TEST_ENV_PROPAGATION_MARKER, "present", "real process.env vars must survive when no env option is passed");
+
+    await closeAll(gateway, upstream);
+  } finally {
+    delete process.env.RUFLO_TEST_ENV_PROPAGATION_MARKER;
+  }
+});
+
 test("leaves an explicit tier alias in `model` untouched and never calls route()", async () => {
   for (const tier of ["tier-fast", "tier-heavy", "tier-frontier", "tier-private"]) {
     const { server: upstream, port: upstreamPort } = await echoUpstream();

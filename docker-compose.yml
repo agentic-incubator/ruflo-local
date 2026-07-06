@@ -86,6 +86,14 @@ services:
       # the SAME collector endpoint litellm's OTEL_EXPORTER=otlp_http already posts
       # gen_ai.* spans to, so both flow through one shared traces pipeline.
       - OTEL_ENDPOINT=${OTEL_ENDPOINT:-http://otel-collector:4318/v1/traces}
+      # Phase 7 fix: reflex.mjs's judge/escalate calls run INSIDE route-gateway via
+      # GatewayClient, authenticating back to litellm with THIS key — without it,
+      # GatewayClient fell back to config.mjs's hardcoded "sk-local-master" default,
+      # which litellm rejects (401) whenever .env sets a custom key, same as litellm's
+      # own environment line below. Silently broke every real (non-mocked) judge/
+      # escalation call since phase 2 shipped; only surfaced once phase 7's live
+      # escalation drill actually exercised it against a real frontier key.
+      - LITELLM_MASTER_KEY=${LITELLM_MASTER_KEY:-sk-local-master}
     command: ["node", "/app/scripts/gateway-server.mjs"]
     restart: unless-stopped
 
