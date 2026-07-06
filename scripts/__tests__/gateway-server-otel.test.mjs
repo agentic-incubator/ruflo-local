@@ -100,9 +100,55 @@ test("emits a span with ruflo.route.{tier,category,escalated,judge_score} for an
   assert.equal(captured.attributes["ruflo.route.category"], "coder");
   assert.equal(captured.attributes["ruflo.route.escalated"], true);
   assert.equal(captured.attributes["ruflo.route.judge_score"], 0.0);
+  assert.equal(captured.attributes["ruflo.route.judge_score_bucket"], "0.0-0.2");
   assert.equal(captured.attributes["ruflo.route.floor"], "tier-fast", "the router-resolved floor for this agent type/category");
   assert.equal(typeof captured.attributes["ruflo.route.budget_rung"], "string", "budget_rung is only known when router.mjs actually ran");
   assert.ok(captured.endTimeMs >= captured.startTimeMs);
+
+  await closeAll(gateway, upstream);
+});
+
+test("judge_score_bucket is 'unscored' (never null/undefined) for a request that never reaches the judge", async () => {
+  const { server: upstream, port: upstreamPort } = await chatUpstream("private answer");
+  let captured = null;
+  const spanFn = async (span) => { captured = span; };
+  const gateway = createGatewayServer({ upstream: `http://127.0.0.1:${upstreamPort}`, spanFn, recordFn: async () => {} });
+  const gatewayPort = await listen(gateway);
+
+  const res = await request(gatewayPort, "/v1/chat/completions", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ model: "tier-private", messages: [{ role: "user", content: "my secret" }] }),
+  });
+
+  assert.equal(res.status, 200);
+  const settled = await poll(() => captured !== null);
+  assert.ok(settled, "spanFn should have been called");
+  assert.equal(captured.attributes["ruflo.route.judge_score"], null);
+  assert.equal(captured.attributes["ruflo.route.judge_score_bucket"], "unscored");
+
+  await closeAll(gateway, upstream);
+});
+
+test("judge_score_bucket covers the top boundary (1.0) in the last bucket, not a 6th one", async () => {
+  const { server: upstream } = startReflexFakeUpstream({ judgeScore: 1.0 }); // at/above threshold -> not escalated
+  const upstreamPort = await listen(upstream);
+  let captured = null;
+  const spanFn = async (span) => { captured = span; };
+  const gateway = createGatewayServer({ upstream: `http://127.0.0.1:${upstreamPort}`, spanFn, recordFn: async () => {} });
+  const gatewayPort = await listen(gateway);
+
+  const res = await request(gatewayPort, "/v1/chat/completions", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ model: "auto", metadata: { agentType: "coder" }, messages: [{ role: "user", content: "what is 2+2?" }] }),
+  });
+
+  assert.equal(res.status, 200);
+  const settled = await poll(() => captured !== null);
+  assert.ok(settled, "spanFn should have been called");
+  assert.equal(captured.attributes["ruflo.route.judge_score"], 1.0);
+  assert.equal(captured.attributes["ruflo.route.judge_score_bucket"], "0.8-1.0");
 
   await closeAll(gateway, upstream);
 });

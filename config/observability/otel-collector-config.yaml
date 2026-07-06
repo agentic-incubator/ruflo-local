@@ -40,6 +40,10 @@ connectors:
       - name: ruflo.route.tier
       - name: ruflo.route.escalated
       - name: ruflo.route.budget_rung
+      # Phase 6: judge_score itself stays span-only (continuous value, not label-safe), but
+      # its bucketed form (5 fixed ranges + "unscored") is low-cardinality and backs the
+      # Grafana dashboard's judge-score-distribution panel.
+      - name: ruflo.route.judge_score_bucket
 
 exporters:
   # Prometheus scrape target (prometheus.yml → job_name: otel-collector).

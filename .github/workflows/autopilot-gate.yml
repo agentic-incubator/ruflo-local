@@ -69,13 +69,15 @@ jobs:
             config/gateways/litellm-config.yaml \
             config/observability/prometheus.yml \
             config/observability/grafana-datasources.yml \
+            config/observability/grafana-dashboards-provisioning.yml \
             config/observability/otel-collector-config.yaml \
             config/gateways/helicone-config.yaml
           shellcheck smoke-test.sh scripts/*.sh
           jq -e . \
             config/routing/ruflo-tiers.json \
             config/routing/router-policy.example.json \
-            config/gateways/bifrost-config.json >/dev/null
+            config/gateways/bifrost-config.json \
+            config/observability/dashboards/routing-decisions.json >/dev/null
           # Tolerant Node ESM syntax check — no-op until scripts/lib/ exists (Phase 1).
           rc=0
           if [ -d scripts/lib ]; then

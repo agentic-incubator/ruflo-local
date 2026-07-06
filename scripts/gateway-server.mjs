@@ -69,6 +69,21 @@ function categoryOf(parsed) {
   return typeof agentType === "string" && agentType ? agentType : "unrouted";
 }
 
+/**
+ * Buckets a judge score into 5 fixed, low-cardinality ranges — unlike the raw continuous
+ * score (never a valid Prometheus label, per phase 5's own cardinality reasoning), a
+ * handful of discrete buckets is. "unscored" covers every request that never reached
+ * reflex.mjs's judge at all (tier-private, non-scorable tiers, an unjudged tier-frontier
+ * serve) — verify-escalate.mjs's own scorer guarantees a real score is always in [0,1],
+ * so any in-range value always lands in exactly one bucket.
+ */
+function judgeScoreBucket(judgeScore) {
+  if (typeof judgeScore !== "number" || Number.isNaN(judgeScore)) return "unscored";
+  const clamped = Math.min(Math.max(judgeScore, 0), 1);
+  const lo = Math.min(Math.floor(clamped * 5) / 5, 0.8);
+  return `${lo.toFixed(1)}-${(lo + 0.2).toFixed(1)}`;
+}
+
 /** tier -> $/1M-tokens, reusing train-router.mjs's own cost table (never re-invented). */
 const TIER_COST_PER_M_TOK = Object.fromEntries(DEFAULT_CANDIDATES.map((c) => [c.tier, c.costPerMTok]));
 
@@ -149,6 +164,7 @@ function recordServed(res, recordFn, spanFn, { category, tier, prompt, requestSt
         "ruflo.route.budget_rung": budgetRung,
         "ruflo.route.escalated": escalated,
         "ruflo.route.judge_score": judgeScore,
+        "ruflo.route.judge_score_bucket": judgeScoreBucket(judgeScore),
       },
     }).catch(() => {});
   };
