@@ -12,6 +12,16 @@ import http from "node:http";
 import net from "node:net";
 import { createGatewayServer } from "../gateway-server.mjs";
 
+// Phase 3 wires a REAL recorder by default (writing to .ruvector/routing-corpus.rvf via
+// a real embedder) — irrelevant to phases 0/1's proxy/routing behavior and, left
+// unstubbed, would pollute the repo's real corpus file with test traffic on every run.
+// gw() is createGatewayServer() with that default recorder swapped for a no-op; the
+// dedicated recorder tests (gateway-server-recorder.test.mjs) inject their own.
+const NOOP_RECORD = async () => {};
+function gw(opts) {
+  return createGatewayServer({ recordFn: NOOP_RECORD, ...opts });
+}
+
 function listen(server) {
   return new Promise((resolve) => server.listen(0, "127.0.0.1", () => resolve(server.address().port)));
 }
@@ -53,7 +63,7 @@ test("forwards method, path, and body verbatim to the upstream", async () => {
       res.end(JSON.stringify({ method: req.method, url: req.url, body: Buffer.concat(chunks).toString() }));
     });
   });
-  const gateway = createGatewayServer({ upstream: `http://127.0.0.1:${upstreamPort}` });
+  const gateway = gw({ upstream: `http://127.0.0.1:${upstreamPort}` });
   const gatewayPort = await listen(gateway);
   const requestBody = JSON.stringify({ model: "tier-fast", messages: [] });
 
@@ -77,7 +87,7 @@ test("forwards response status, headers, and body verbatim from the upstream", a
     res.writeHead(200, { "content-type": "application/json", "x-upstream-marker": "TIER1-OK" });
     res.end(JSON.stringify({ ok: true }));
   });
-  const gateway = createGatewayServer({ upstream: `http://127.0.0.1:${upstreamPort}` });
+  const gateway = gw({ upstream: `http://127.0.0.1:${upstreamPort}` });
   const gatewayPort = await listen(gateway);
 
   const res = await request(gatewayPort, "/health/liveliness");
@@ -95,7 +105,7 @@ test("streams a large response back without buffering it whole", async () => {
     res.writeHead(200, { "content-type": "text/plain" });
     res.end(payload);
   });
-  const gateway = createGatewayServer({ upstream: `http://127.0.0.1:${upstreamPort}` });
+  const gateway = gw({ upstream: `http://127.0.0.1:${upstreamPort}` });
   const gatewayPort = await listen(gateway);
 
   const res = await request(gatewayPort, "/big");
@@ -107,7 +117,7 @@ test("streams a large response back without buffering it whole", async () => {
 });
 
 test("returns a clean 502 (never crashes) when the upstream is unreachable", async () => {
-  const gateway = createGatewayServer({ upstream: "http://127.0.0.1:1" }); // nothing listens on port 1
+  const gateway = gw({ upstream: "http://127.0.0.1:1" }); // nothing listens on port 1
   const gatewayPort = await listen(gateway);
 
   const res = await request(gatewayPort, "/health/liveliness");
@@ -126,7 +136,7 @@ test("survives a client hard-resetting mid-response instead of crashing the proc
     res.write("first-chunk-");
     req.on("close", () => res.destroy()); // unwind once the gateway drops this leg, don't hang open
   });
-  const gateway = createGatewayServer({ upstream: `http://127.0.0.1:${upstreamPort}` });
+  const gateway = gw({ upstream: `http://127.0.0.1:${upstreamPort}` });
   const gatewayPort = await listen(gateway);
 
   let uncaught = null;
@@ -155,7 +165,7 @@ test("survives a client hard-resetting mid-response instead of crashing the proc
 test("survives a client disconnecting before the upstream ever responds (502 race)", async () => {
   // The client drops, THEN the upstream call errors — res is already destroyed with no
   // per-response listener yet at that point, so the 502 write path itself must guard.
-  const gateway = createGatewayServer({ upstream: "http://127.0.0.1:1" }); // nothing listens on port 1
+  const gateway = gw({ upstream: "http://127.0.0.1:1" }); // nothing listens on port 1
 
   let uncaught = null;
   const onUncaught = (err) => {
@@ -185,7 +195,7 @@ test("GATEWAY_UPSTREAM_URL env override selects the upstream when no explicit up
     res.writeHead(200, {});
     res.end("via-env-override");
   });
-  const gateway = createGatewayServer({ env: { GATEWAY_UPSTREAM_URL: `http://127.0.0.1:${upstreamPort}` } });
+  const gateway = gw({ env: { GATEWAY_UPSTREAM_URL: `http://127.0.0.1:${upstreamPort}` } });
   const gatewayPort = await listen(gateway);
 
   const res = await request(gatewayPort, "/anything");
@@ -222,7 +232,7 @@ test("rewrites `model` to the router-resolved tier when metadata.agentType is pr
     callArgs = args;
     return { tier: "tier-heavy" };
   };
-  const gateway = createGatewayServer({ upstream: `http://127.0.0.1:${upstreamPort}`, routeFn });
+  const gateway = gw({ upstream: `http://127.0.0.1:${upstreamPort}`, routeFn });
   const gatewayPort = await listen(gateway);
 
   const res = await request(gatewayPort, "/v1/chat/completions", {
@@ -245,7 +255,7 @@ test("leaves an explicit tier alias in `model` untouched and never calls route()
       called = true;
       return { tier: "tier-frontier" };
     };
-    const gateway = createGatewayServer({ upstream: `http://127.0.0.1:${upstreamPort}`, routeFn });
+    const gateway = gw({ upstream: `http://127.0.0.1:${upstreamPort}`, routeFn });
     const gatewayPort = await listen(gateway);
     const requestBody = JSON.stringify({ model: tier, metadata: { agentType: "reviewer" }, messages: [] });
 
@@ -280,7 +290,7 @@ test("recognizes a mis-cased/whitespace-varied explicit tier and never calls rou
       called = true;
       return { tier: "tier-frontier" };
     };
-    const gateway = createGatewayServer({ upstream: `http://127.0.0.1:${upstreamPort}`, routeFn });
+    const gateway = gw({ upstream: `http://127.0.0.1:${upstreamPort}`, routeFn });
     const gatewayPort = await listen(gateway);
     const requestBody = JSON.stringify({ model: raw, metadata: { agentType: "researcher" }, messages: [] });
 
@@ -302,7 +312,7 @@ test("fails open (forwards the original model) when route() throws", async () =>
   const routeFn = async () => {
     throw new Error("router.mjs blew up");
   };
-  const gateway = createGatewayServer({ upstream: `http://127.0.0.1:${upstreamPort}`, routeFn });
+  const gateway = gw({ upstream: `http://127.0.0.1:${upstreamPort}`, routeFn });
   const gatewayPort = await listen(gateway);
   const requestBody = JSON.stringify({ model: "auto", metadata: { agentType: "coder" }, messages: [] });
 
@@ -325,7 +335,7 @@ test("forwards unchanged when there is no explicit tier and no metadata.agentTyp
     called = true;
     return { tier: "tier-frontier" };
   };
-  const gateway = createGatewayServer({ upstream: `http://127.0.0.1:${upstreamPort}`, routeFn });
+  const gateway = gw({ upstream: `http://127.0.0.1:${upstreamPort}`, routeFn });
   const gatewayPort = await listen(gateway);
   const requestBody = JSON.stringify({ model: "gpt-4-ish", messages: [] });
 
@@ -348,7 +358,7 @@ test("treats an empty-string metadata.agentType the same as no agentType at all"
     called = true;
     return { tier: "tier-frontier" };
   };
-  const gateway = createGatewayServer({ upstream: `http://127.0.0.1:${upstreamPort}`, routeFn });
+  const gateway = gw({ upstream: `http://127.0.0.1:${upstreamPort}`, routeFn });
   const gatewayPort = await listen(gateway);
   const requestBody = JSON.stringify({ model: "auto", metadata: { agentType: "" }, messages: [] });
 
@@ -371,7 +381,7 @@ test("wires the real router.mjs route() by default and honors the shipped policy
   // (echoed back, not real Prometheus text) and reads 0 utilization — harmless here
   // since a tier-heavy target is never budget-steered.
   const { server: upstream, port: upstreamPort } = await echoUpstream();
-  const gateway = createGatewayServer({ upstream: `http://127.0.0.1:${upstreamPort}` });
+  const gateway = gw({ upstream: `http://127.0.0.1:${upstreamPort}` });
   const gatewayPort = await listen(gateway);
   const requestBody = JSON.stringify({ model: "auto", metadata: { agentType: "reviewer" }, messages: [] });
 
@@ -388,7 +398,7 @@ test("wires the real router.mjs route() by default and honors the shipped policy
 
 test("a body exactly at the cap succeeds (off-by-one boundary check)", async () => {
   const { server: upstream, port: upstreamPort } = await echoUpstream();
-  const gateway = createGatewayServer({ upstream: `http://127.0.0.1:${upstreamPort}` });
+  const gateway = gw({ upstream: `http://127.0.0.1:${upstreamPort}` });
   const gatewayPort = await listen(gateway);
   const exactCap = "x".repeat(10 * 1024 * 1024); // exactly MAX_BODY_BYTES — must NOT be rejected
 
@@ -406,7 +416,7 @@ test("a body exactly at the cap succeeds (off-by-one boundary check)", async () 
 
 test("a body larger than the cap is rejected with 413 instead of hanging or crashing", async () => {
   const { server: upstream, port: upstreamPort } = await echoUpstream();
-  const gateway = createGatewayServer({ upstream: `http://127.0.0.1:${upstreamPort}` });
+  const gateway = gw({ upstream: `http://127.0.0.1:${upstreamPort}` });
   const gatewayPort = await listen(gateway);
   const oversized = "x".repeat(11 * 1024 * 1024); // over the 10MB cap
 

@@ -10,6 +10,16 @@ import assert from "node:assert/strict";
 import http from "node:http";
 import { createGatewayServer } from "../gateway-server.mjs";
 
+// Phase 3 wires a REAL recorder by default (writing to .ruvector/routing-corpus.rvf via
+// a real embedder) — irrelevant to phase 2's reflex behavior and, left unstubbed, would
+// pollute the repo's real corpus file with test traffic on every run. gw() is
+// createGatewayServer() with that default recorder swapped for a no-op; the dedicated
+// recorder tests (gateway-server-recorder.test.mjs) inject their own.
+const NOOP_RECORD = async () => {};
+function gw(opts) {
+  return createGatewayServer({ recordFn: NOOP_RECORD, ...opts });
+}
+
 function listen(server) {
   return new Promise((resolve) => server.listen(0, "127.0.0.1", () => resolve(server.address().port)));
 }
@@ -78,7 +88,7 @@ function startReflexFakeUpstream({ servedAnswer = "local answer", judgeScore = 1
 test("escalates to the frontier answer when the judge scores the local answer low", async () => {
   const { server: upstream, requests } = startReflexFakeUpstream({ judgeScore: 0.0 }); // well below default threshold 0.6
   const upstreamPort = await listen(upstream);
-  const gateway = createGatewayServer({ upstream: `http://127.0.0.1:${upstreamPort}` });
+  const gateway = gw({ upstream: `http://127.0.0.1:${upstreamPort}` });
   const gatewayPort = await listen(gateway);
 
   const res = await request(gatewayPort, "/v1/chat/completions", {
@@ -99,7 +109,7 @@ test("escalates to the frontier answer when the judge scores the local answer lo
 test("keeps the local answer when the judge scores it high", async () => {
   const { server: upstream, requests } = startReflexFakeUpstream({ judgeScore: 1.0 }); // well above default threshold 0.6
   const upstreamPort = await listen(upstream);
-  const gateway = createGatewayServer({ upstream: `http://127.0.0.1:${upstreamPort}` });
+  const gateway = gw({ upstream: `http://127.0.0.1:${upstreamPort}` });
   const gatewayPort = await listen(gateway);
 
   const res = await request(gatewayPort, "/v1/chat/completions", {
@@ -122,7 +132,7 @@ test("tier-private produces ZERO judge/escalation egress calls — the privacy p
   // fail-closed short-circuit holds even when everything ELSE about the setup would escalate.
   const { server: upstream, requests } = startReflexFakeUpstream({ judgeScore: 0.0, servedAnswer: "private answer" });
   const upstreamPort = await listen(upstream);
-  const gateway = createGatewayServer({ upstream: `http://127.0.0.1:${upstreamPort}` });
+  const gateway = gw({ upstream: `http://127.0.0.1:${upstreamPort}` });
   const gatewayPort = await listen(gateway);
 
   const res = await request(gatewayPort, "/v1/chat/completions", {
@@ -150,7 +160,7 @@ test("a mis-cased tier-private + agentType still produces ZERO egress calls (con
   // never silently reopen.
   const { server: upstream, requests } = startReflexFakeUpstream({ judgeScore: 0.0, servedAnswer: "private answer" });
   const upstreamPort = await listen(upstream);
-  const gateway = createGatewayServer({ upstream: `http://127.0.0.1:${upstreamPort}` });
+  const gateway = gw({ upstream: `http://127.0.0.1:${upstreamPort}` });
   const gatewayPort = await listen(gateway);
 
   const res = await request(gatewayPort, "/v1/chat/completions", {
@@ -193,7 +203,7 @@ test("a Unicode homoglyph in tier-private + agentType still produces ZERO egress
   assert.equal(homoglyphModel.codePointAt(1), 0x0456, "sanity: the substituted char really is U+0456");
   const { server: upstream, requests } = startReflexFakeUpstream({ judgeScore: 0.0, servedAnswer: "private answer" });
   const upstreamPort = await listen(upstream);
-  const gateway = createGatewayServer({ upstream: `http://127.0.0.1:${upstreamPort}` });
+  const gateway = gw({ upstream: `http://127.0.0.1:${upstreamPort}` });
   const gatewayPort = await listen(gateway);
 
   const res = await request(gatewayPort, "/v1/chat/completions", {
@@ -220,7 +230,7 @@ test("a Unicode homoglyph in tier-private + agentType still produces ZERO egress
 test("a streaming request bypasses reflex entirely (SSE isn't a single JSON blob to buffer)", async () => {
   const { server: upstream, requests } = startReflexFakeUpstream({ judgeScore: 0.0 });
   const upstreamPort = await listen(upstream);
-  const gateway = createGatewayServer({ upstream: `http://127.0.0.1:${upstreamPort}` });
+  const gateway = gw({ upstream: `http://127.0.0.1:${upstreamPort}` });
   const gatewayPort = await listen(gateway);
 
   const res = await request(gatewayPort, "/v1/chat/completions", {

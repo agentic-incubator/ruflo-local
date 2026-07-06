@@ -48,8 +48,10 @@ fix_budget: 5
 
 # Phases with real behavioral blast radius: 0 (a new service claims host :4000 for the first
 # time — every request in the stack now flows through new code), 2 (the judge/escalation path,
-# where the fail-closed privacy pin must survive contact with a live process, not just a test).
-risk_phases: [0, 2]
+# where the fail-closed privacy pin must survive contact with a live process, not just a test),
+# 4 (swaps route-gateway's base image + adds a build step to the same always-on :4000 service —
+# a broken image build or install step takes down 100% of live traffic, same risk class as 0).
+risk_phases: [0, 2, 4]
 
 phases:
   # ── Foundational seam: transparent proxy, zero decision logic yet ───────────────────────────
@@ -120,8 +122,40 @@ phases:
     adrs:  []
     ddd:   []
 
-  # ── Observability: spans + Prometheus dimensions ────────────────────────────────────────────
+  # ── Make the recorder's writes real, not just wired ─────────────────────────────────────────
+  # Added post-phase-3, grounded via the RuvNet brain (ruvector/npm/packages/rvf-node/package.json,
+  # ruvector/npm/packages/ruvllm/package.json, ruvector/npm/core/platforms/linux-{x64,arm64}-gnu):
+  # @ruvector/rvf and @ruvector/ruvllm are native N-API/Rust bindings published as PREBUILT
+  # GNU/glibc binaries only — no musl/alpine variant exists. route-gateway's image (node:24-alpine,
+  # musl libc — bumped from the phase-0 node:22-alpine as part of the repo-wide Node 22→24
+  # standardization, Node 22 EOL April 2027) can never resolve them even with an install step,
+  # and it has no install step at all (repo root's package.json — introduced by the parent
+  # local-first-learned-routing pipeline — lists them as optionalDependencies, never installed
+  # into this container). Result: phase 3's recorder wiring is real and tested, but in the
+  # actually-deployed gateway it silently fails open on every request (by recorder.mjs's own
+  # correct, by-design no-stub-embeddings behavior) instead of ever writing a real DRACO row.
+  # This phase closes that gap before phase 6 (old 5)'s smoke-test corpus-growth assertion and
+  # phase 5 (old 4)'s Grafana corpus-growth-rate panel need it to show real data.
   - id: 4
+    goal: "Make recorder.mjs's live DRACO writes actually persist: switch route-gateway from node:24-alpine (musl — incompatible with @ruvector/rvf's and @ruvector/ruvllm's prebuilt GNU/glibc-only native bindings) to a glibc-based Node 24 image, install package.json's optionalDependencies into the container, and mount a persistent volume for .ruvector/ so corpus rows survive a container restart instead of living only in the ephemeral container filesystem."
+    deliverables:
+      - "A Dockerfile for route-gateway (e.g. docker/route-gateway/Dockerfile) based on a glibc Node 24 image (e.g. node:24-slim), COPYing repo-root package.json + package-lock.json and running `npm ci --omit=dev` so @ruvector/rvf and @ruvector/ruvllm's optionalDependencies resolve to their prebuilt linux-x64-gnu/linux-arm64-gnu native bindings; docker-compose.yml's route-gateway service switches from `image: node:24-alpine` to `build:` this Dockerfile."
+      - "docker-compose.yml: a new named volume (e.g. route-gateway-corpus) mounted at /app/.ruvector on the route-gateway service, so RoutingRecorder's default corpus path persists across `docker compose restart`/redeploys instead of vanishing with the container."
+      - "A live verification: after rebuilding, both packages resolve inside the running container (no throw), and a real request through route-gateway produces a real row on the persisted volume."
+    definition_of_done:
+      - "cmd: docker compose config -q  — the Dockerfile build + new volume mount still parse"
+      - "cmd: docker compose build route-gateway  — the image builds successfully with the install step"
+      - "cmd: docker compose up -d route-gateway && docker exec route-gateway node -e \"require.resolve('@ruvector/rvf'); require.resolve('@ruvector/ruvllm')\"  — both resolve without throwing inside the container"
+      - "grep: route-gateway-corpus|\\.ruvector in docker-compose.yml  — the persistent volume is defined and mounted"
+      - "grep:absent: node:24-alpine in docker-compose.yml's route-gateway service  — musl image replaced"
+      - "prose: a real request through the rebuilt route-gateway followed by inspecting the mounted volume shows a genuinely new row (path + row count before/after), not just 'recorder called' — cite the actual command + output."
+    conventions: "If a target platform genuinely has no published prebuilt binary (e.g. an exotic arch), recorder.mjs's existing JSONL/no-embedder fail-open behavior is the correct degradation, not a bug to work around — document that explicitly as a known limitation rather than forcing a build from source (napi-rs native crates are not meant to be source-built in a minimal container)."
+    depends_on: [3]
+    adrs:  []
+    ddd:   []
+
+  # ── Observability: spans + Prometheus dimensions ────────────────────────────────────────────
+  - id: 5
     goal: "Emit an OTel span per gateway decision carrying ruflo.route.{tier,floor,category,budget_rung,escalated,judge_score} attributes alongside the existing gen_ai.* spans, and extend the collector's spanmetrics connector so these become Prometheus-queryable dimensions — the machine-readable half of 'prove it's happening at runtime.'"
     deliverables:
       - "scripts/gateway-server.mjs: an OTel span per request with the ruflo.route.* attributes, exported to the existing otel-collector (same OTEL_ENDPOINT convention as litellm-config.yaml)."
@@ -133,13 +167,13 @@ phases:
       - "grep: ruflo.route in config/observability/otel-collector-config.yaml  — the connector dimensions are extended"
       - "prose: a live request's span is visible in the collector's debug exporter output (or a Prometheus query against the new dimension) — cite the actual query/output in phase evidence, not just 'spans configured.'"
     conventions: "Reuse the existing otlp_http → spanmetrics → prometheus pipeline already proven by litellm's gen_ai spans (config/observability/otel-collector-config.yaml) — do not stand up a second collector or exporter."
-    depends_on: [3]
+    depends_on: [4]
     adrs:  []
     ddd:   []
 
   # ── Visual proof: a Grafana dashboard ───────────────────────────────────────────────────────
-  - id: 5
-    goal: "Give the routing decision loop a Grafana dashboard — the graphical proof: tier-share over time, escalation rate, budget-demotion rungs, DRACO corpus growth rate, and judge-score distribution, all reading from the Prometheus dimensions phase 4 added. Auto-provisioned (no manual click-ops), matching the existing datasource-provisioning convention."
+  - id: 6
+    goal: "Give the routing decision loop a Grafana dashboard — the graphical proof: tier-share over time, escalation rate, budget-demotion rungs, DRACO corpus growth rate, and judge-score distribution, all reading from the Prometheus dimensions phase 5 added. Auto-provisioned (no manual click-ops), matching the existing datasource-provisioning convention."
     deliverables:
       - "config/observability/dashboards/routing-decisions.json — a Grafana dashboard: (1) tier-share-over-time (stacked area, by ruflo_route_tier), (2) escalation-rate (rate of ruflo.route.escalated=true), (3) budget-demotion-rungs (current rung + history), (4) DRACO-corpus-growth-rate (rows/hour), (5) judge-score distribution (histogram)."
       - "config/observability/grafana-dashboards-provisioning.yml — a dashboards provisioning pointer (apiVersion 1, a file-based provider), mirroring grafana-datasources.yml's pattern."
@@ -149,15 +183,15 @@ phases:
       - "cmd: test -f config/observability/dashboards/routing-decisions.json && jq -e '.panels | length >= 5' config/observability/dashboards/routing-decisions.json >/dev/null  — the five panels exist"
       - "cmd: test -f config/observability/grafana-dashboards-provisioning.yml"
       - "grep: routing-decisions in docker-compose.yml  — the dashboard is actually mounted into the grafana service"
-      - "prose: a screenshot (or exported PNG) of the live dashboard, taken after running smoke-test.sh (phase 6) at least once so the panels have real data, attached as phase evidence — the graphical proof this whole plan exists to produce."
-    conventions: "File-based provisioning only — no manual Grafana UI dashboard creation, so the dashboard survives a `docker compose down -v`. Panel queries reference the ruflo.route.* dimensions phase 4 added; do not invent new metric names not actually emitted by the collector."
-    depends_on: [4]
+      - "prose: a screenshot (or exported PNG) of the live dashboard, taken after running smoke-test.sh (phase 7) at least once so the panels have real data, attached as phase evidence — the graphical proof this whole plan exists to produce."
+    conventions: "File-based provisioning only — no manual Grafana UI dashboard creation, so the dashboard survives a `docker compose down -v`. Panel queries reference the ruflo.route.* dimensions phase 5 added; do not invent new metric names not actually emitted by the collector."
+    depends_on: [5]
     adrs:  []
     ddd:   []
 
   # ── Scripted proof: smoke-test.sh live assertions ───────────────────────────────────────────
-  - id: 6
-    goal: "Extend smoke-test.sh with assertions that actually exercise the live decision path end-to-end: a forced known-bad local answer escalates to frontier; a real DRACO row lands after a real call; tier-private never leaves the box through the live gateway. The scripted counterpart to phase 5's visual proof."
+  - id: 7
+    goal: "Extend smoke-test.sh with assertions that actually exercise the live decision path end-to-end: a forced known-bad local answer escalates to frontier; a real DRACO row lands after a real call; tier-private never leaves the box through the live gateway. The scripted counterpart to phase 6's visual proof."
     deliverables:
       - "smoke-test.sh: a new section forcing a low-quality local answer (mock or a known-weak prompt) and asserting the response actually came from tier-frontier (escalated), not tier-fast."
       - "smoke-test.sh: a new section asserting the DRACO corpus row count increases by exactly 1 after a real call, with a real (non-zero-length, non-hash-stub) embedding."
@@ -167,12 +201,12 @@ phases:
       - "grep: escalat in smoke-test.sh  — the escalation drill is present"
       - "grep: corpus|draco in smoke-test.sh  — the corpus-growth check is present"
     conventions: "SMOKE_LOCAL_ONLY must still degrade the escalation drill gracefully (skip, don't fail) when no frontier key is configured, matching the existing tier-3 pattern in smoke-test.sh."
-    depends_on: [5]
+    depends_on: [6]
     adrs:  []
     ddd:   []
 
   # ── Correct the record: fix every doc that overclaimed runtime status ───────────────────────
-  - id: 7
+  - id: 8
     goal: "Now that router.mjs/reflex.mjs/recorder.mjs actually run live, correct every doc and pipeline note that either understated it (their own STATUS headers, now stale) or previously OVERCLAIMED it before this plan shipped — so the docs finally match the code in both directions."
     deliverables:
       - "scripts/lib/router.mjs, reflex.mjs, recorder.mjs: update each STATUS header — no longer 'NOT in the live request path'; now 'live, called from scripts/gateway-server.mjs (see live-routing-gateway-rationale.md).'"
@@ -186,6 +220,6 @@ phases:
       - "grep: live-routing-cutover|gateway-server.mjs in docs/guide/reference/tiers-and-routing.md"
       - "prose: the .autopilot/pipeline.yml correction is an ADDENDUM (dated, explaining what was wrong and why), not a silent rewrite of the original phase-7 text — preserving the historical record of the mistake this whole audit started from."
     conventions: "This phase is documentation-only — no code changes. Its DoD is entirely grep/prose because its job is textual accuracy, not behavior. Do not soften the correction — state plainly that the prior text was wrong, per the audit that motivated this plan."
-    depends_on: [6]
+    depends_on: [7]
     adrs:  []
     ddd:   []

@@ -65,7 +65,7 @@ services:
   # litellm/bifrost/helicone no longer bind host :4000 — only route-gateway does,
   # uniformly across all three, so exactly one container ever claims that port.
   route-gateway:
-    image: node:22-alpine
+    image: node:24-alpine
     container_name: route-gateway
     working_dir: /app
     ports:

@@ -11,9 +11,14 @@
 // (tier-fast/tier-heavy) answer gets judged and, on a low score, escalated to
 // tier-frontier; every other tier (tier-private above all) never reaches the judge —
 // checked BEFORE the response is even buffered, defense-in-depth alongside reflex.mjs's
-// own fail-closed isScorable check. Neither router.mjs nor reflex.mjs's own logic is
-// modified, only called, for the first time, from live code. Later phases wire
-// recorder.mjs in here too.
+// own fail-closed isScorable check. Phase 3 wires recorder.mjs into every served
+// request: once the client-visible response is fully flushed, a real DRACO row (real
+// embedding, tier, category, judge_score, cost, latency, escalated, REAL success/
+// failure outcome) is recorded fire-and-forget — a recorder failure (missing real
+// embedder, corrupt corpus, whatever) is swallowed exactly like a reflex/router
+// failure, never affecting the response already sent. router.mjs, reflex.mjs, and
+// recorder.mjs's own logic is never modified, only called, for the first time, from
+// live code.
 //
 // GATEWAY_UPSTREAM_URL follows the existing OLLAMA_API_BASE/VLLM_API_BASE env-override
 // convention (config.mjs): default http://litellm:4000, override in .env when
@@ -27,7 +32,10 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { gatewayServerConfig, routerPolicyConfig } from "./lib/config.mjs";
 import { route as routeRequest, TIER_LADDER } from "./lib/router.mjs";
-import { reflex as reflexAnswer, isScorable, canonicalTier } from "./lib/reflex.mjs";
+import { reflex as reflexAnswer, isScorable, canonicalTier, escalationTier } from "./lib/reflex.mjs";
+import { RoutingRecorder, outcomeFromReflex } from "./lib/recorder.mjs";
+import { DEFAULT_CANDIDATES } from "./lib/train-router.mjs";
+import { GatewayClient } from "./lib/gateway-client.mjs";
 
 const MODULE_DIR = path.dirname(fileURLToPath(import.meta.url));
 const EXPLICIT_TIERS = new Set([...TIER_LADDER, "tier-private"]);
@@ -46,6 +54,90 @@ function loadPolicy(env) {
 
 function hasBody(method) {
   return !["GET", "HEAD"].includes(method.toUpperCase());
+}
+
+/** The category (ruflo agent type) recorded alongside a decision — "unrouted" when the
+ *  request carries no metadata.agentType (an explicit-tier or signal-less request still
+ *  gets a real DRACO row, just under a fallback category). */
+function categoryOf(parsed) {
+  const agentType = parsed?.metadata?.agentType;
+  return typeof agentType === "string" && agentType ? agentType : "unrouted";
+}
+
+/** tier -> $/1M-tokens, reusing train-router.mjs's own cost table (never re-invented). */
+const TIER_COST_PER_M_TOK = Object.fromEntries(DEFAULT_CANDIDATES.map((c) => [c.tier, c.costPerMTok]));
+
+/** Real (not guessed) USD cost from the upstream's own `usage.total_tokens`, when present;
+ *  0 for a free local tier or when no usage was reported (e.g. a streamed/piped response
+ *  we never buffered — buffering it just to count tokens would defeat streaming). */
+function estimateCost(tier, usage) {
+  const perMillion = TIER_COST_PER_M_TOK[tier];
+  const tokens = usage?.total_tokens;
+  return typeof perMillion === "number" && perMillion > 0 && typeof tokens === "number" && Number.isFinite(tokens)
+    ? (tokens / 1_000_000) * perMillion
+    : 0;
+}
+
+/**
+ * Default fire-and-forget recorder: lazily opens ONE real RoutingRecorder per server
+ * (the real in-process ruvllm embedder, honoring RUFLO_REQUIRE_REAL_EMBEDDINGS) and
+ * reuses it for every request, rather than reopening the corpus per call.
+ */
+function createDefaultRecordFn(env) {
+  let recorderPromise;
+  return async function record(decision) {
+    recorderPromise ??= RoutingRecorder.open({ env });
+    const recorder = await recorderPromise;
+    return recorder.record(decision);
+  };
+}
+
+/**
+ * Records one served decision, fire-and-forget, once `res` finishes flushing to the
+ * client — "after responding to the client" per the phase-3 deliverable, never before.
+ * A missing `tier` (no chat request was actually served, e.g. a bodyless GET) records
+ * nothing: there is no real decision to log. Any recorder failure (no real embedder
+ * under RUFLO_REQUIRE_REAL_EMBEDDINGS, a corrupt corpus, whatever) is swallowed here —
+ * exactly like a reflex/router failure, it must never surface to an already-sent response.
+ *
+ * `cost`, when passed explicitly, overrides the usage-derived estimate — needed for an
+ * escalated decision, whose real cost is the SUM of the local tier's own usage plus the
+ * separately-billed escalation call's usage (estimateCost(tier, usage) alone can only
+ * ever see one tier's usage at a time).
+ *
+ * A response that never reaches 'finish' (the client vanished before headers, or `res`
+ * was destroyed/ended by an error handler before this call) still represents a REAL
+ * decision outcome worth recording — D11's whole point is that a failure must not be
+ * silently dropped — so an already-settled `res` fires immediately instead of waiting
+ * on an event that will never arrive.
+ */
+function recordServed(res, recordFn, { category, tier, prompt, requestStart, judgeScore = null, escalated = false, success, usage, cost }) {
+  if (tier === undefined) return;
+  const decision = {
+    prompt,
+    category,
+    tier,
+    judge_score: judgeScore,
+    cost: cost ?? estimateCost(tier, usage),
+    latency: performance.now() - requestStart,
+    escalated,
+    success,
+  };
+  const fire = () => { void recordFn(decision).catch(() => {}); };
+  if (res.writableFinished || res.destroyed) {
+    fire();
+  } else {
+    res.once("finish", fire);
+  }
+}
+
+/** Writes the response, then records the decision — the one pairing every buffered
+ *  response-handling branch needs, so a future field addition touches recordFields
+ *  in one place per branch instead of the write/record sequencing itself. */
+function respondAndRecord(res, { statusCode, statusMessage, headers, body }, recordFn, recordFields) {
+  res.writeHead(statusCode, statusMessage, headers);
+  res.end(body);
+  recordServed(res, recordFn, recordFields);
 }
 
 /**
@@ -108,16 +200,17 @@ function lastMessageContent(parsed) {
  * rewrites `model` to its canonical form too, so litellm gets an alias it definitely
  * recognizes and reflex.mjs's own downstream check sees the same canonical value.
  *
- * Always returns the SERVED tier (whatever ends up in `model`, routed or not) and the
- * prompt text, so the response side can decide reflex-eligibility without re-parsing.
- * @returns {Promise<{body:Buffer, servedTier:string|undefined, prompt:string, streaming:boolean}>}
+ * Always returns the SERVED tier (whatever ends up in `model`, routed or not), the
+ * prompt text, and the recordable category, so the response side can decide
+ * reflex-eligibility and record a DRACO row without re-parsing.
+ * @returns {Promise<{body:Buffer, servedTier:string|undefined, prompt:string, streaming:boolean, category:string}>}
  */
 async function prepareRequest(bodyBuffer, { routeFn, policy, env, upstream }) {
   let parsed;
   try {
     parsed = JSON.parse(bodyBuffer.toString("utf8"));
   } catch {
-    return { body: bodyBuffer, servedTier: undefined, prompt: "", streaming: false };
+    return { body: bodyBuffer, servedTier: undefined, prompt: "", streaming: false, category: "unrouted" };
   }
 
   // Boolean(), not `=== true`: err toward NOT buffering on an ambiguous value (e.g. a
@@ -126,15 +219,16 @@ async function prepareRequest(bodyBuffer, { routeFn, policy, env, upstream }) {
   // odd but truly non-streaming request) only costs a judge pass, never correctness.
   const streaming = Boolean(parsed?.stream);
   const prompt = lastMessageContent(parsed);
+  const category = categoryOf(parsed);
   const originalModel = typeof parsed?.model === "string" ? parsed.model : undefined;
   const canonicalModel = originalModel !== undefined ? canonicalTier(originalModel) : undefined;
 
   if (canonicalModel !== undefined && EXPLICIT_TIERS.has(canonicalModel)) {
     if (canonicalModel === originalModel) {
-      return { body: bodyBuffer, servedTier: originalModel, prompt, streaming };
+      return { body: bodyBuffer, servedTier: originalModel, prompt, streaming, category };
     }
     parsed.model = canonicalModel;
-    return { body: Buffer.from(JSON.stringify(parsed), "utf8"), servedTier: canonicalModel, prompt, streaming };
+    return { body: Buffer.from(JSON.stringify(parsed), "utf8"), servedTier: canonicalModel, prompt, streaming, category };
   }
 
   // A model string with anything outside plain ASCII letters/digits/hyphens is
@@ -147,12 +241,12 @@ async function prepareRequest(bodyBuffer, { routeFn, policy, env, upstream }) {
   // routing at all — forward it unchanged instead. litellm's own alias lookup will
   // then loudly fail to resolve it rather than us silently serving/judging it wrong.
   if (canonicalModel !== undefined && canonicalModel !== "" && !ASCII_TIER_NAME.test(canonicalModel)) {
-    return { body: bodyBuffer, servedTier: originalModel, prompt, streaming };
+    return { body: bodyBuffer, servedTier: originalModel, prompt, streaming, category };
   }
 
   const agentType = parsed?.metadata?.agentType;
   if (!agentType) {
-    return { body: bodyBuffer, servedTier: originalModel, prompt, streaming }; // no routing signal — forward unchanged
+    return { body: bodyBuffer, servedTier: originalModel, prompt, streaming, category }; // no routing signal — forward unchanged
   }
 
   try {
@@ -161,9 +255,9 @@ async function prepareRequest(bodyBuffer, { routeFn, policy, env, upstream }) {
     // same proxy instead of reaching the real gateway it needs to read.
     const decision = await routeFn({ agentType, policy, env: { ...env, GW: upstream } });
     parsed.model = decision.tier;
-    return { body: Buffer.from(JSON.stringify(parsed), "utf8"), servedTier: decision.tier, prompt, streaming };
+    return { body: Buffer.from(JSON.stringify(parsed), "utf8"), servedTier: decision.tier, prompt, streaming, category };
   } catch {
-    return { body: bodyBuffer, servedTier: originalModel, prompt, streaming }; // router.mjs threw — fail OPEN
+    return { body: bodyBuffer, servedTier: originalModel, prompt, streaming, category }; // router.mjs threw — fail OPEN
   }
 }
 
@@ -204,7 +298,7 @@ function collectResponseBody(proxyRes) {
  * A scorable-tier (tier-fast/tier-heavy), non-streaming response is ALSO buffered so
  * its answer can be judged/escalated via reflex.mjs; every other response — above all
  * tier-private — stays pure streaming passthrough too, never read into memory.
- * @param {{upstream?:string, env?:object, policy?:object, routeFn?:Function, reflexFn?:Function}} [opts]
+ * @param {{upstream?:string, env?:object, policy?:object, routeFn?:Function, reflexFn?:Function, recordFn?:Function}} [opts]
  */
 export function createGatewayServer(opts = {}) {
   const cfg = gatewayServerConfig(opts.env);
@@ -213,17 +307,20 @@ export function createGatewayServer(opts = {}) {
   const policy = opts.policy ?? loadPolicy(opts.env);
   const routeFn = opts.routeFn ?? routeRequest;
   const reflexFn = opts.reflexFn ?? reflexAnswer;
+  const recordFn = opts.recordFn ?? createDefaultRecordFn(opts.env);
 
   return http.createServer(async (req, res) => {
     // Guards res's WHOLE lifecycle from the first line — a client can disconnect during
     // body buffering (before any proxyReq exists) just as easily as mid-response, and
     // either way an unhandled 'error' would crash the whole always-on process.
     res.on("error", () => {});
+    const requestStart = performance.now();
 
     let outBody = null;
     let servedTier;
     let prompt = "";
     let streaming = false;
+    let category = "unrouted";
     if (hasBody(req.method)) {
       let bodyBuffer;
       try {
@@ -244,6 +341,7 @@ export function createGatewayServer(opts = {}) {
       servedTier = prepared.servedTier;
       prompt = prepared.prompt;
       streaming = prepared.streaming;
+      category = prepared.category;
     }
 
     const headers = { ...req.headers, host: upstream.host };
@@ -254,14 +352,17 @@ export function createGatewayServer(opts = {}) {
       headers["content-length"] = String(Buffer.byteLength(outBody));
     }
 
-    // reflex() only applies to a scorable, NON-STREAMING response: an SSE-streamed chat
-    // completion isn't a single JSON blob at all, so buffering one whole would both
-    // defeat the point of streaming and is out of this phase's scope. Checked here,
-    // BEFORE the response is ever buffered — defense-in-depth alongside reflex.mjs's own
-    // fail-closed isScorable check, so a non-scorable tier (tier-private above all) is
-    // never even read into memory, matching phase 1's "privacy checked first,
-    // unconditionally, before any potentially wasteful work" convention.
-    const eligibleForReflex = servedTier !== undefined && !streaming && isScorable(servedTier, opts.env);
+    // bufferable: safe to read the response into memory at all — TIER_LADDER excludes
+    // tier-private and any unrecognized/unrouted string by construction (reflex.mjs's
+    // own "unknown ⇒ private" fail-closed philosophy), so this never risks buffering a
+    // private response; checked here, BEFORE the response is ever buffered, matching
+    // phase 1's "privacy checked first, unconditionally" convention. judgeable narrows
+    // that further to the scorable subset reflex.mjs actually judges (tier-fast/
+    // tier-heavy by default) — tier-frontier is bufferable (so its real usage/cost can
+    // be captured, the only tier that actually costs money) but not judgeable: it's
+    // already the top of the ladder, there is nothing to escalate it TO.
+    const bufferable = servedTier !== undefined && !streaming && TIER_LADDER.includes(servedTier);
+    const judgeable = bufferable && isScorable(servedTier, opts.env);
 
     const proxyReq = client.request(
       {
@@ -273,39 +374,77 @@ export function createGatewayServer(opts = {}) {
         headers,
       },
       (proxyRes) => {
-        if (!eligibleForReflex) {
+        if (!bufferable) {
           res.writeHead(proxyRes.statusCode, proxyRes.statusMessage, proxyRes.headers);
           proxyRes.pipe(res);
+          recordServed(res, recordFn, {
+            category, tier: servedTier, prompt, requestStart,
+            success: proxyRes.statusCode < 400,
+          });
           return;
         }
 
         collectResponseBody(proxyRes)
           .then(async (responseBuffer) => {
+            // Forwards the response BYTES exactly as received (never re-serialized, so
+            // headers/content-length always match the body on the wire) and records
+            // whatever usage was actually parseable — 0 fields lost relative to before,
+            // just one place instead of four separately hand-repeated write/end/record
+            // sequences.
+            const asIs = (usage) => respondAndRecord(
+              res,
+              { statusCode: proxyRes.statusCode, statusMessage: proxyRes.statusMessage, headers: proxyRes.headers, body: responseBuffer },
+              recordFn,
+              { category, tier: servedTier, prompt, requestStart, success: proxyRes.statusCode < 400, usage },
+            );
+
             let parsed;
             try {
               parsed = JSON.parse(responseBuffer.toString("utf8"));
             } catch {
-              res.writeHead(proxyRes.statusCode, proxyRes.statusMessage, proxyRes.headers);
-              res.end(responseBuffer); // not JSON (error body, etc.) — forward unchanged
+              asIs(); // not JSON (error body, etc.) — forward unchanged, nothing to capture
               return;
             }
 
             const answer = parsed?.choices?.[0]?.message?.content;
-            if (typeof answer !== "string") {
-              res.writeHead(proxyRes.statusCode, proxyRes.statusMessage, proxyRes.headers);
-              res.end(responseBuffer); // no recognizable answer to judge — forward unchanged
+            if (!judgeable || typeof answer !== "string") {
+              // Either a bufferable-but-not-judged tier (tier-frontier: real usage/cost
+              // captured now that we've parsed the body, but nothing to escalate it to)
+              // or a judgeable tier whose response has no recognizable answer shape.
+              asIs(parsed?.usage);
               return;
             }
 
+            // GW points at the REAL upstream — the same self-loop fix as phase 1's
+            // budget snapshot: the judge/escalation call must never loop back through
+            // this same gateway's own :4000. Also backs our own escalate() below.
+            const reflexEnv = { ...opts.env, GW: upstream.origin };
+            let escalationUsage;
+            // A behavioral clone of reflex.mjs's OWN default escalate (same
+            // GatewayClient, same model/messages shape, same degrade-to-"" on any
+            // failure) — reflex.mjs's decision logic is completely unaffected. The only
+            // difference: gw.chat() returns the full parsed body (so `usage` can be
+            // captured as a side effect) instead of gw.chatContent(), which discards
+            // everything but the answer string — the real cost of an escalation is
+            // otherwise unobservable, since chatContent() never exposes it.
+            const escalate = async (p) => {
+              try {
+                const data = await new GatewayClient({ env: reflexEnv }).chat({
+                  model: escalationTier(reflexEnv),
+                  messages: [{ role: "user", content: p }],
+                });
+                escalationUsage = data?.usage;
+                return data?.choices?.[0]?.message?.content ?? "";
+              } catch {
+                return "";
+              }
+            };
+
             let verdictResult;
             try {
-              // GW points at the REAL upstream — the same self-loop fix as phase 1's
-              // budget snapshot: the judge/escalation call must never loop back through
-              // this same gateway's own :4000.
-              verdictResult = await reflexFn({ tier: servedTier, prompt, answer, env: { ...opts.env, GW: upstream.origin } });
+              verdictResult = await reflexFn({ tier: servedTier, prompt, answer, escalate, env: reflexEnv });
             } catch {
-              res.writeHead(proxyRes.statusCode, proxyRes.statusMessage, proxyRes.headers);
-              res.end(responseBuffer); // reflex.mjs is defensive and shouldn't throw, but fail open regardless
+              asIs(parsed?.usage); // reflex.mjs is defensive and shouldn't throw, but fail open regardless
               return;
             }
 
@@ -313,18 +452,34 @@ export function createGatewayServer(opts = {}) {
             const finalBody = Buffer.from(JSON.stringify(parsed), "utf8");
             const finalHeaders = { ...proxyRes.headers };
             delete finalHeaders["transfer-encoding"];
+            delete finalHeaders["content-encoding"]; // finalBody is always freshly-serialized, uncompressed JSON
             finalHeaders["content-length"] = String(Buffer.byteLength(finalBody));
-            res.writeHead(proxyRes.statusCode, proxyRes.statusMessage, finalHeaders);
-            res.end(finalBody);
+            // outcomeFromReflex (recorder.mjs, unchanged): an escalation means the LOCAL
+            // tier's answer was judged inadequate — a NEGATIVE for that decision, D11.
+            // The recorded `tier`/`success` stay about THAT local decision either way;
+            // `cost` is the REAL total spend for this prompt — the local tier's own
+            // usage plus, when escalated, the separately-billed escalation call's usage
+            // (estimateCost(tier, usage) alone can only ever see one tier at a time).
+            const { escalated, success } = outcomeFromReflex(verdictResult);
+            const cost = estimateCost(servedTier, parsed?.usage) + (escalated ? estimateCost(escalationTier(reflexEnv), escalationUsage) : 0);
+            respondAndRecord(
+              res,
+              { statusCode: proxyRes.statusCode, statusMessage: proxyRes.statusMessage, headers: finalHeaders, body: finalBody },
+              recordFn,
+              { category, tier: servedTier, prompt, requestStart, judgeScore: verdictResult.verdict?.score ?? null, escalated, success, cost },
+            );
           })
           .catch(() => {
             // Buffering the response itself failed (too large / upstream aborted) — bytes
             // already consumed can't be replayed as a faithful passthrough, so a clean 502
-            // is the honest answer rather than a corrupted partial response.
+            // is the honest answer rather than a corrupted partial response. Still a REAL
+            // decision outcome (D11: the tier was resolved and the request failed) — must
+            // not be silently absent from the corpus.
             if (!res.writableEnded && !res.destroyed) {
               res.writeHead(502, { "content-type": "application/json" });
               res.end(JSON.stringify({ error: "bad_gateway", message: "response buffering failed" }));
             }
+            recordServed(res, recordFn, { category, tier: servedTier, prompt, requestStart, success: false });
           });
       },
     );
@@ -342,13 +497,19 @@ export function createGatewayServer(opts = {}) {
 
     // Upstream unreachable (not yet up, wrong profile, etc.) — fail as a clean 502
     // rather than letting the client hang. Guard against the client having already
-    // disconnected (res destroyed above) before the upstream error arrives.
+    // disconnected (res destroyed above) before the upstream error arrives. Still
+    // records the decision (D11: a resolved tier that then failed is a REAL negative
+    // outcome) even when the client already vanished — recordServed fires immediately
+    // when `res` is already destroyed/ended instead of waiting on a 'finish' that will
+    // never come.
     proxyReq.on("error", (err) => {
-      if (res.destroyed || res.writableEnded) return;
-      if (!res.headersSent) {
-        res.writeHead(502, { "content-type": "application/json" });
+      if (!res.destroyed && !res.writableEnded) {
+        if (!res.headersSent) {
+          res.writeHead(502, { "content-type": "application/json" });
+        }
+        res.end(JSON.stringify({ error: "bad_gateway", message: err.message }));
       }
-      res.end(JSON.stringify({ error: "bad_gateway", message: err.message }));
+      recordServed(res, recordFn, { category, tier: servedTier, prompt, requestStart, success: false });
     });
 
     if (outBody !== null) {
