@@ -22,9 +22,21 @@
 # ProviderWeighted — it picks among PROVIDERS via a `providers: [{provider,weight}]`
 # field, not specific models, so a `models:` list under it was invalid. Each tier needs
 # ONE specific model, which is `model-latency` (ModelLatency, field `models: [modelId]`)
-# — the same strategy tier-frontier already correctly used. Also: providers.ollama-local
-# needs its own `models:` list of the real (unprefixed) tags it exposes, and
+# — the same strategy tier-frontier already correctly used. Also: the provider needs
+# its own `models:` list of the real (unprefixed) tags it exposes, and
 # `cache-store: {type: disabled}` isn't a real variant — omit the block entirely instead.
+#
+# PROVIDER KEY MUST BE LITERALLY "ollama" (confirmed 2026-07-07 against ai-gateway/src/
+# types/provider.rs + middleware/mapper/registry.rs source): the previous "ollama-local"
+# name deserialized into the untagged InferenceProvider::Named(String) catch-all, which
+# only has a HARDCODED converter allowlist (mistral/groq/deepseek/xai/hyperbolic) —
+# "ollama-local" matched none of them, so every chat completion failed with "Converter
+# not present for OpenAI(ChatCompletions) -> OpenAICompatible{...}". Ollama is actually
+# a FIRST-CLASS native InferenceProvider variant with its own registered OllamaConverter
+# — naming the key exactly "ollama" resolves to that variant instead of the untagged
+# fallback. The provider config struct (GlobalProviderConfig) also has no `type` field
+# at all — only `models`/`base-url`/`version` — so the old `type: openai-compatible`
+# line was always inert.
 #
 # GENERATED FILE — do not edit helicone-config.yaml by hand. Edit this .tmpl and
 # config/model-sets.json, then run `make render` (scripts/render-configs.mjs). The
@@ -36,18 +48,17 @@
 # =============================================================================
 
 providers:
-  # Custom OpenAI-compatible local endpoint (Ollama). Verify the base_url key name
-  # against the config reference. Unlike LiteLLM this is not read from OLLAMA_API_BASE
-  # — host-native Ollama users edit it to http://host.docker.internal:11434/v1.
-  # http://ollama:11434/v1 is real Ollama for mlx/gguf; the CI variant points it at
-  # fake-upstream (docker-compose.ci.yml) instead — see scripts/render-configs.mjs.
-  ollama-local:
-    type: openai-compatible
+  # Native Ollama provider — key MUST be literally "ollama" (see header note). Unlike
+  # LiteLLM this is not read from OLLAMA_API_BASE — host-native Ollama users edit
+  # base-url to http://host.docker.internal:11434/v1. http://ollama:11434/v1 is real
+  # Ollama for mlx/gguf; the CI variant points it at fake-upstream (docker-compose.ci.yml)
+  # instead — see scripts/render-configs.mjs.
+  ollama:
     base-url: http://ollama:11434/v1
     # A provider must declare the real (unprefixed) model IDs it exposes — confirmed
-    # live against the real schema (embedded providers.yaml), which "missing field
-    # `models`" pointed at. Routers below reference these via the ollama-local/<tag>
-    # prefixed form; this list is the raw tags themselves.
+    # live against the real schema, which "missing field `models`" pointed at. Routers
+    # below reference these via the ollama/<tag> prefixed form; this list is the raw
+    # tags themselves.
     models:
       - qwen3.6:35b-a3b-q4_K_M
       - qwen3.6:27b-mlx
@@ -60,7 +71,7 @@ routers:
       chat:
         strategy: model-latency
         models:
-          - ollama-local/qwen3.6:35b-a3b-q4_K_M   # 35B MoE, ~3B active, SWE-bench ~73.4% (vendor-reported). Local tag is selected per-hardware by scripts/render-configs.mjs.
+          - ollama/qwen3.6:35b-a3b-q4_K_M   # 35B MoE, ~3B active, SWE-bench ~73.4% (vendor-reported). Local tag is selected per-hardware by scripts/render-configs.mjs.
 
   # --- Tier 2: local-heavy ---
   heavy:
@@ -68,7 +79,7 @@ routers:
       chat:
         strategy: model-latency
         models:
-          - ollama-local/qwen3.6:27b-mlx   # dense 27B. Local tag is selected per-hardware by scripts/render-configs.mjs (Apple-Silicon MLX build vs plain).
+          - ollama/qwen3.6:27b-mlx   # dense 27B. Local tag is selected per-hardware by scripts/render-configs.mjs (Apple-Silicon MLX build vs plain).
 
   # --- Tier 3: frontier (budget-capped; latency-balanced across Claude/GPT/Gemini) ---
   frontier:
@@ -92,7 +103,7 @@ routers:
       chat:
         strategy: model-latency
         models:
-          - ollama-local/qwen3.6:27b-mlx   # dense 27B. Local tag is selected per-hardware by scripts/render-configs.mjs (Apple-Silicon MLX build vs plain).
+          - ollama/qwen3.6:27b-mlx   # dense 27B. Local tag is selected per-hardware by scripts/render-configs.mjs (Apple-Silicon MLX build vs plain).
 
 # Caching is OPT-IN and left OFF so the standalone variant needs no Redis/S3 — simply
 # omitting cache-store does this; `type: disabled` is not a real schema variant

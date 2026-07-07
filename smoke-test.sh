@@ -19,6 +19,20 @@ if [ -z "${GATEWAY_ADDRESSING:-}" ]; then
   GATEWAY_ADDRESSING="model"
   [ "$GATEWAY_KIND" = "helicone" ] && GATEWAY_ADDRESSING="path"
 fi
+# Helicone (unlike LiteLLM/Bifrost) validates `model` against its OWN global catalog
+# even under router-scoped /router/<name>/ addressing — a bodyless-model or alias-only
+# call 400s ("Missing"/"Invalid model id"), confirmed live. The real provider/model id
+# a router actually serves is already in the rendered config, so read it from there
+# instead of hardcoding a tag that varies per hardware variant.
+HELICONE_CONFIG="$(dirname "$0")/config/gateways/helicone-config.yaml"
+helicone_router_model(){ # $1=router name (no "tier-" prefix)
+  python3 -c '
+import sys, yaml
+with open(sys.argv[1]) as f:
+    cfg = yaml.safe_load(f)
+print(cfg["routers"][sys.argv[2]]["load-balance"]["chat"]["models"][0])
+' "$HELICONE_CONFIG" "$1" 2>/dev/null
+}
 # fake-upstream (scripts/lib/fake-upstream-server.mjs, docker-compose.ci.yml) — a
 # controllable transparent proxy in front of Ollama. When reachable, it gives the
 # escalation/fall-through drills below real, deterministic signal on ANY gateway
@@ -65,9 +79,11 @@ ask(){ # $1=alias $2=prompt
     # source) — "tier-frontier" (13) can't exist as a router name at all, so Helicone's
     # routers drop the "tier-" prefix uniformly (fast/heavy/frontier/private) rather
     # than special-casing just the one tier that overflows. See helicone-config.yaml.tmpl.
-    curl -sS "$GW/router/${1#tier-}/chat/completions" \
+    router="${1#tier-}"
+    model="$(helicone_router_model "$router")"
+    curl -sS "$GW/router/$router/chat/completions" \
       -H "Authorization: Bearer $KEY" -H "Content-Type: application/json" \
-      -d "{\"max_tokens\":60,\"messages\":[{\"role\":\"user\",\"content\":\"$2\"}]}"
+      -d "{\"model\":\"$model\",\"max_tokens\":60,\"messages\":[{\"role\":\"user\",\"content\":\"$2\"}]}"
   else
     curl -sS "$GW/v1/chat/completions" \
       -H "Authorization: Bearer $KEY" -H "Content-Type: application/json" \

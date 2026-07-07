@@ -22,9 +22,21 @@
 # ProviderWeighted — it picks among PROVIDERS via a `providers: [{provider,weight}]`
 # field, not specific models, so a `models:` list under it was invalid. Each tier needs
 # ONE specific model, which is `model-latency` (ModelLatency, field `models: [modelId]`)
-# — the same strategy tier-frontier already correctly used. Also: providers.ollama-local
-# needs its own `models:` list of the real (unprefixed) tags it exposes, and
+# — the same strategy tier-frontier already correctly used. Also: the provider needs
+# its own `models:` list of the real (unprefixed) tags it exposes, and
 # `cache-store: {type: disabled}` isn't a real variant — omit the block entirely instead.
+#
+# PROVIDER KEY MUST BE LITERALLY "ollama" (confirmed 2026-07-07 against ai-gateway/src/
+# types/provider.rs + middleware/mapper/registry.rs source): the previous "ollama-local"
+# name deserialized into the untagged InferenceProvider::Named(String) catch-all, which
+# only has a HARDCODED converter allowlist (mistral/groq/deepseek/xai/hyperbolic) —
+# "ollama-local" matched none of them, so every chat completion failed with "Converter
+# not present for OpenAI(ChatCompletions) -> OpenAICompatible{...}". Ollama is actually
+# a FIRST-CLASS native InferenceProvider variant with its own registered OllamaConverter
+# — naming the key exactly "ollama" resolves to that variant instead of the untagged
+# fallback. The provider config struct (GlobalProviderConfig) also has no `type` field
+# at all — only `models`/`base-url`/`version` — so the old `type: openai-compatible`
+# line was always inert.
 #
 # GENERATED FILE — do not edit helicone-config.yaml by hand. Edit this .tmpl and
 # config/model-sets.json, then run `make render` (scripts/render-configs.mjs). The
@@ -36,18 +48,17 @@
 # =============================================================================
 
 providers:
-  # Custom OpenAI-compatible local endpoint (Ollama). Verify the base_url key name
-  # against the config reference. Unlike LiteLLM this is not read from OLLAMA_API_BASE
-  # — host-native Ollama users edit it to http://host.docker.internal:11434/v1.
-  # {{OLLAMA_BASE_URL}} is real Ollama for mlx/gguf; the CI variant points it at
-  # fake-upstream (docker-compose.ci.yml) instead — see scripts/render-configs.mjs.
-  ollama-local:
-    type: openai-compatible
+  # Native Ollama provider — key MUST be literally "ollama" (see header note). Unlike
+  # LiteLLM this is not read from OLLAMA_API_BASE — host-native Ollama users edit
+  # base-url to http://host.docker.internal:11434/v1. {{OLLAMA_BASE_URL}} is real
+  # Ollama for mlx/gguf; the CI variant points it at fake-upstream (docker-compose.ci.yml)
+  # instead — see scripts/render-configs.mjs.
+  ollama:
     base-url: {{OLLAMA_BASE_URL}}
     # A provider must declare the real (unprefixed) model IDs it exposes — confirmed
-    # live against the real schema (embedded providers.yaml), which "missing field
-    # `models`" pointed at. Routers below reference these via the ollama-local/<tag>
-    # prefixed form; this list is the raw tags themselves.
+    # live against the real schema, which "missing field `models`" pointed at. Routers
+    # below reference these via the ollama/<tag> prefixed form; this list is the raw
+    # tags themselves.
     models:
       - {{TIER_FAST_MODEL_BARE}}
       - {{TIER_HEAVY_MODEL_BARE}}

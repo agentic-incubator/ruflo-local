@@ -63,7 +63,7 @@ const ollamaBaseUrl = `${ollamaBaseUrlBare}/v1`;
 const prefixers = {
   litellm:  (tag) => `ollama_chat/${tag}`,   // LiteLLM: provider baked into model string
   bifrost:  (tag) => tag,                     // Bifrost: provider is a separate JSON field
-  helicone: (tag) => `ollama-local/${tag}`,   // Helicone: custom provider name / model
+  helicone: (tag) => `ollama/${tag}`,   // Helicone: provider key MUST be "ollama" (native InferenceProvider variant, not the untagged custom-provider fallback — see helicone-config.yaml.tmpl)
 };
 
 const gateways = [
@@ -73,11 +73,11 @@ const gateways = [
 ];
 
 // ---- 4. Render each gateway --------------------------------------------------
-// {{TIER_*_MODEL}} is the per-gateway-prefixed form (e.g. "ollama-local/qwen2.5:0.5b"
-// for Helicone's routers), used for REFERENCING a tier from elsewhere. {{TIER_*_MODEL_BARE}}
+// {{TIER_*_MODEL}} is the per-gateway-prefixed form (e.g. "ollama/qwen2.5:0.5b" for
+// Helicone's routers), used for REFERENCING a tier from elsewhere. {{TIER_*_MODEL_BARE}}
 // is the raw tag with no provider prefix — needed where a gateway's OWN provider block
-// declares which model IDs it exposes (e.g. Helicone's providers.ollama-local.models),
-// as opposed to referencing one.
+// declares which model IDs it exposes (e.g. Helicone's providers.ollama.models), as
+// opposed to referencing one.
 function render(templateText, prefix) {
   return templateText
     .split("{{TIER_FAST_MODEL_BARE}}").join(fast)
