@@ -43,12 +43,12 @@ You need these for any working install.
 - **What / why:** the LiteLLM gateway (default) plus its keys, budgets, and the gateway selector.
 - **Configure:**
   ```bash
-  cp .env.example .env         # then edit: add frontier keys, set COMPOSE_PROFILES, master key
+  cp .env.example .env         # then edit: add frontier keys, master key
   make render                  # render gateway configs to your hardware (needs Node.js, see §4);
                                #   non-Apple-Silicon: make render RUFLO_MODEL_VARIANT=gguf
-  docker compose up -d         # brings up the default (LiteLLM) gateway + shared infra
+  make gateway-up               # brings up the default (LiteLLM) gateway + shared infra
   ```
-  Set frontier API keys (`ANTHROPIC_API_KEY` / `OPENAI_API_KEY` / `GEMINI_API_KEY`) for the `tier-frontier` lane, and pick your gateway with `COMPOSE_PROFILES` (see [Gateway Variants](gateway-variants.md)). Frontier keys are optional if you only ever run local tiers.
+  Set frontier API keys (`ANTHROPIC_API_KEY` / `OPENAI_API_KEY` / `GEMINI_API_KEY`) for the `tier-frontier` lane. To pick a different gateway, use `make gateway-up PROFILE=<name>` (see [Gateway Variants](gateway-variants.md) — it sets both `COMPOSE_PROFILES` and `GATEWAY_UPSTREAM_URL` together; hand-setting only `COMPOSE_PROFILES` leaves `route-gateway` forwarding to the old upstream). Frontier keys are optional if you only ever run local tiers.
 - **Why `make render` is not optional:** the committed gateway configs are **generated** from `config/templates/*.tmpl`. `make render` auto-detects your arch (Apple Silicon → MLX, else → GGUF) and stamps the matching local model tags into `config/gateways/*`. Skip it on a non-Apple-Silicon host and `tier-heavy`/`tier-private` point at a `-mlx` tag that host never pulled → those tiers fail. Re-running is idempotent.
 - **Verify:**
   ```bash
@@ -123,4 +123,4 @@ Only needed if you want the [router mitigations](limitations-and-mitigations.md#
 ---
 
 > [!TIP]
-> Minimum viable install = **Docker + Ollama + Node.js + `cp .env.example .env` + `make render` + `docker compose up -d`**. Everything below the Required tier is opt-in — add it when you reach for the feature it unlocks.
+> Minimum viable install = **Docker + Ollama + Node.js + `cp .env.example .env` + `make render` + `make gateway-up`**. Everything below the Required tier is opt-in — add it when you reach for the feature it unlocks.

@@ -17,7 +17,7 @@
 4. **RouteLLM's default router phones home for embeddings** (OpenAI), and its checkpoints were trained on an older model generation — rankings still transfer per the paper, but treat it as a heuristic, not ground truth.
 5. **Ollama concurrency:** mostly sequential; multi-user or parallel-agent load queues. The vLLM profile solves it at the cost of NVIDIA-only + more setup.
 6. **Single-node, homelab-grade:** no HA, no multi-instance budget sync (that needs Redis), Postgres on the same box. Fine for a power user; not a company platform as-is.
-7. **LiteLLM is a Python proxy:** single-digit-ms overhead, wants periodic patching; at hundreds of RPS it becomes the bottleneck — far beyond personal use, but it's the known scale ceiling. → **now mitigated in this kit:** drop-in [Bifrost & Helicone gateway variants](gateway-variants.md) (Go/Rust, µs-class, native OTel), selectable via `COMPOSE_PROFILES` with no client change.
+7. **LiteLLM is a Python proxy:** single-digit-ms overhead, wants periodic patching; at hundreds of RPS it becomes the bottleneck — far beyond personal use, but it's the known scale ceiling. → **now mitigated in this kit:** drop-in [Bifrost & Helicone gateway variants](gateway-variants.md) (Go/Rust, µs-class, native OTel), selectable via `make gateway-up PROFILE=<name>` with no client change.
 8. **Quantization is not free:** Q4 GGUF weights trade measurable quality for memory; strict-format and long-context tasks feel it first. Prefer Q5/Q6 or AWQ when memory allows.
 9. **Maintenance is on you:** model updates, image updates, key rotation, disk for model blobs (tens of GB), and the weekly metrics review.
 

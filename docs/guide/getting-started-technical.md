@@ -72,7 +72,7 @@ cp .env.example .env
 $EDITOR .env                 # set LITELLM_MASTER_KEY + any frontier keys
 make render                  # render gateway configs to your hardware (Apple Silicon→MLX, else→GGUF)
                              #   force a variant: make render RUFLO_MODEL_VARIANT=gguf
-docker compose up -d
+make gateway-up               # LiteLLM (default) — switch with PROFILE=bifrost|helicone, see Gateway Variants
 ```
 
 > [!IMPORTANT]

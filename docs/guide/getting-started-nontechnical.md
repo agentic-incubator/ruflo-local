@@ -76,7 +76,7 @@ Open the new `.env` file in any text editor. Set a password where it says `LITEL
 **② Match the settings to your computer, then turn on the mail room**
 ```bash
 make render          # tunes the config for your computer (Mac→fast "MLX" build automatically)
-docker compose up -d
+make gateway-up      # starts the mail room (the default AI gateway) + its helpers
 ```
 > 💡 **Not on an Apple Silicon Mac?** Run `make render RUFLO_MODEL_VARIANT=gguf` instead. (This step needs **Node.js** installed — see [Prerequisites](reference/prerequisites.md). Skipping it makes the stronger and sealed lanes point at a model your computer never downloaded.)
 
