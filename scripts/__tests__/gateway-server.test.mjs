@@ -308,6 +308,36 @@ test("recognizes a mis-cased/whitespace-varied explicit tier and never calls rou
   }
 });
 
+test("recognizes Helicone's /router/<name>/ path as an explicit tier and never rewrites the body", async () => {
+  // Helicone addresses tiers via the URL path, not `model` — and requires the REAL
+  // resolved model id in the body (validated against its own catalog), never an alias.
+  // Router names drop the "tier-" prefix (12-char ID cap on Helicone's side), so
+  // /router/fast/ must map back to tier-fast for judging/recording, while the body's
+  // real model id passes through byte-for-byte, unlike the litellm-style bypass above.
+  for (const [routerName, tier] of [["fast", "tier-fast"], ["heavy", "tier-heavy"], ["frontier", "tier-frontier"], ["private", "tier-private"]]) {
+    const { server: upstream, port: upstreamPort } = await echoUpstream();
+    let called = false;
+    const routeFn = async () => {
+      called = true;
+      return { tier: "tier-frontier" };
+    };
+    const gateway = gw({ upstream: `http://127.0.0.1:${upstreamPort}`, routeFn });
+    const gatewayPort = await listen(gateway);
+    const requestBody = JSON.stringify({ model: "ollama/qwen2.5:0.5b", metadata: { agentType: "reviewer" }, messages: [] });
+
+    const res = await request(gatewayPort, `/router/${routerName}/chat/completions`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: requestBody,
+    });
+
+    assert.equal(await receivedModel(res), "ollama/qwen2.5:0.5b", `the real model id must pass through unchanged for /router/${routerName}/`);
+    assert.equal(called, false, `route() must never be called for /router/${routerName}/ (path IS the explicit tier: ${tier})`);
+
+    await closeAll(gateway, upstream);
+  }
+});
+
 test("fails open (forwards the original model) when route() throws", async () => {
   const { server: upstream, port: upstreamPort } = await echoUpstream();
   const routeFn = async () => {
