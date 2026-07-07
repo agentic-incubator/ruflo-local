@@ -1,0 +1,21 @@
+{
+  "captured_at": "2026-07-04T19:07:49Z",
+  "gateway": "http://localhost:4000",
+  "source": "phase-0 baseline — static routing; no learned router or traffic history yet",
+  "latency": {
+    "model": "tier-fast",
+    "unit": "seconds",
+    "samples": 11,
+    "requested": 15,
+    "p50": 5.833,
+    "p95": 6.299,
+    "mean": 5.541
+  },
+  "tier_shares": {
+    "source": "configured design intent (client picks the tier; no learned distribution yet)",
+    "local": 0.9,
+    "frontier": 0.1,
+    "note": "targets ~90% local / ~10% frontier; measured shares become meaningful once the learned router + recorder land (phases 3-5)"
+  },
+  "escalation_rate": null
+}

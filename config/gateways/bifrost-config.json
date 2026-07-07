@@ -1,0 +1,82 @@
+{
+  "$schema": "https://www.getbifrost.ai/schema",
+
+  "providers": {
+    "ollama": {
+      "keys": [
+        {
+          "name": "tier-fast",
+          "value": "",
+          "models": ["tier-fast"],
+          "weight": 1.0,
+          "aliases": { "tier-fast": "qwen3.6:35b-a3b-q4_K_M" },
+          "ollama_key_config": { "url": "http://ollama:11434" }
+        },
+        {
+          "name": "tier-heavy",
+          "value": "",
+          "models": ["tier-heavy"],
+          "weight": 1.0,
+          "aliases": { "tier-heavy": "qwen3.6:27b-mlx" },
+          "ollama_key_config": { "url": "http://ollama:11434" }
+        },
+        {
+          "name": "tier-private",
+          "value": "",
+          "models": ["tier-private"],
+          "weight": 1.0,
+          "aliases": { "tier-private": "qwen3.6:27b-mlx" },
+          "ollama_key_config": { "url": "http://ollama:11434" }
+        }
+      ]
+    },
+    "anthropic": {
+      "keys": [
+        {
+          "name": "tier-frontier-anthropic",
+          "value": "env.ANTHROPIC_API_KEY",
+          "models": ["tier-frontier"],
+          "weight": 1.0,
+          "aliases": { "tier-frontier": "claude-opus-4-8" }
+        }
+      ]
+    },
+    "openai": {
+      "keys": [
+        {
+          "name": "tier-frontier-openai",
+          "value": "env.OPENAI_API_KEY",
+          "models": ["tier-frontier"],
+          "weight": 1.0,
+          "aliases": { "tier-frontier": "gpt-4.1" }
+        }
+      ]
+    },
+    "gemini": {
+      "keys": [
+        {
+          "name": "tier-frontier-gemini",
+          "value": "env.GEMINI_API_KEY",
+          "models": ["tier-frontier"],
+          "weight": 1.0,
+          "aliases": { "tier-frontier": "gemini-2.5-pro" }
+        }
+      ]
+    }
+  },
+
+  "governance": {
+    "routing_rules": [
+      {
+        "id": "tier-frontier-provider-fallback",
+        "name": "tier-frontier: anthropic primary, openai/gemini fallback",
+        "enabled": true,
+        "cel_expression": "model == 'tier-frontier'",
+        "targets": [{ "provider": "anthropic", "weight": 1.0 }],
+        "fallbacks": ["openai", "gemini"],
+        "scope": "global",
+        "priority": 0
+      }
+    ]
+  }
+}

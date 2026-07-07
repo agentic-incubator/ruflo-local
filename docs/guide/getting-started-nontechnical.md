@@ -73,22 +73,29 @@ cp .env.example .env
 ```
 Open the new `.env` file in any text editor. Set a password where it says `LITELLM_MASTER_KEY` (any phrase you'll remember). If you have paid-service keys, paste them in too — otherwise leave them blank (everything still works, fully local).
 
-**② Turn on the mail room**
+**② Match the settings to your computer, then turn on the mail room**
 ```bash
+make render          # tunes the config for your computer (Mac→fast "MLX" build automatically)
 docker compose up -d
 ```
+> 💡 **Not on an Apple Silicon Mac?** Run `make render RUFLO_MODEL_VARIANT=gguf` instead. (This step needs **Node.js** installed — see [Prerequisites](reference/prerequisites.md). Skipping it makes the stronger and sealed lanes point at a model your computer never downloaded.)
 
 **③ Download the local AI models** (this pulls several gigabytes the first time — grab a coffee ☕)
 ```bash
-docker exec ollama ollama pull qwen3-coder:30b-a3b-q4_K_M
+docker exec ollama ollama pull qwen3.6:35b-a3b-q4_K_M      # the everyday model (tier-fast)
 ```
-> 🍎 **On an Apple Silicon Mac?** A faster "MLX" version of the bigger model is available — pull `qwen3.6:27b-mlx` instead. Your helper (or the Technical Guide) covers the one-line switch.
+The **🔒 sealed private lane and the stronger tier-heavy lane share a bigger model.** If your computer has the memory (≈32 GB+), download it too so those lanes work:
+```bash
+docker exec ollama ollama pull qwen3.6:27b-mlx            # 🍎 Apple Silicon Mac
+docker exec ollama ollama pull qwen3.6:27b                # any other computer
+```
+> On a 16 GB machine, skip the bigger model — the everyday lane still works, and hard/sealed questions simply won't have a local answer yet.
 
 **④ Check that everything works**
 ```bash
 ./smoke-test.sh
 ```
-✅ If it reports each lane answering and the 🔒 private lane staying home, you're done.
+✅ You'll see each lane reported. The **everyday (tier-fast)** lane should answer. If you downloaded the bigger model, the **🔒 private** lane should answer **and stay home** (it never reaches a paid service) and **tier-heavy** should answer too. If you skipped the bigger model, those two lanes will show an error — that's expected, not a failure.
 
 > [!WARNING]
 > **On an Apple Silicon Mac?** There's one extra setting so the AI can use your Mac's chip. See the callout in the [Technical Guide → Step 1](getting-started-technical.md#-step-1--bring-up-the-stack), or ask your helper — it's a two-line change.
@@ -99,7 +106,7 @@ docker exec ollama ollama pull qwen3-coder:30b-a3b-q4_K_M
 
 Open your web browser to these built-in dashboards (they run on your computer):
 
-- 📊 **Grafana** → http://localhost:3000 — pretty charts: how much is answered at home vs. sent out, and what you've spent.
+- 📊 **Grafana** → http://localhost:3000 — pretty charts: how much is answered at home vs. sent out, and what you've spent. (Log in with username `admin` and the `GRAFANA_PASSWORD` from your `.env` file — it defaults to `admin`.)
 - 🎛️ **Control panel** → http://localhost:4000/ui — the mail room's own admin page.
 
 📖 A friendly 10-minute weekly check-in routine → [Observability & Testing](reference/observability.md).

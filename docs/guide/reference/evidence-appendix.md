@@ -26,10 +26,11 @@
 
 `seed-router.fastgrnn.safetensors` · `seed-router.krr{,.low,.med,.high}.json` · `seed-router.calibrator*.json` · `seed-rows.json` · `openrouter-alts.json`.
 
-**`openrouter-alts.json` highlights** (measured 2026-06-15):
+**`openrouter-alts.json` highlights** (rUv's own harness, measured 2026-06-15 — **self-reported, not re-measured or independently verified here**):
 - Per-Claude-tier OpenRouter alternates; `agent-execute-core` uses the suggestion to override `MODEL_MAP[tier]`. Override via `CLAUDE_FLOW_ROUTER_OPENROUTER_ALTS`; per-call via `OPENROUTER_DEFAULT_MODEL`. Explicit caveat: operators should **re-train an artifact with measured DRACO rows for their own traffic**.
 - Cheap tier: Ling 2.6 Flash — 100% pass over 45 runs, ~$0.001/1k passes, ~151× cheaper than Haiku 4.5 in that harness.
 - Mid tier: GPT-4.1 above Sonnet 4.6 on a 5-criterion rubric at ~4× lower cost; Llama-3.3-70B flagged as $/quality Pareto leader (~91% of Sonnet quality at ~70× cheaper).
+- **Cost-multiple caveat:** the ~151× and ~70× are *blended-cost ratios from rUv's harness*, not list-price comparisons. Public per-token pricing puts Ling 2.6 Flash ≈5–30× and Llama-3.3-70B ≈3–9× cheaper than their comparators, and "~91% of Sonnet quality" is not an independently published metric. Treat the multiples as **directional** — the *ranking* is the durable signal, the exact ×-factors are not.
 - **Judge-bias audit** included: cross-grading with GPT-4.1 as judge shifts absolute scores −7…−11 pp but preserves ranking — single-judge numbers are inflated but ordinally honest.
 
 ### A.3 Execution dispatch — `mcp-tools/agent-execute-core.ts`
@@ -60,8 +61,8 @@
 
 | Crate / package | Relevance |
 |---|---|
-| `crates/ruvector-tiny-dancer-core` (+`-node`, `-wasm`) | FastGRNN neural routing engine. 144 ns feature extraction; 7.5 µs single inference; ~93 µs over 100 candidates; <1 MB models with 80–90% sparsity; INT8; conformal uncertainty; circuit breaker. The `fastgrnn` backend `neural-router.ts` loads. |
-| `crates/ruvector-router-core` (+cli/ffi/wasm) | Vector DB + inference engine: HNSW (<0.5 ms p50), SIMD distance, 4–32× quantization. Basis for a semantic route-cache and Path 4's gateway core. |
+| `crates/ruvector-tiny-dancer-core` (+`-node`, `-wasm`) | FastGRNN neural routing engine. Vendor-reported micro-benchmarks (not reproduced here, and the 144 ns / 7.5 µs figures were not locatable even in the upstream repo): 144 ns feature extraction; 7.5 µs single inference; ~93 µs over 100 candidates; <1 MB models with 80–90% sparsity; INT8; conformal uncertainty; circuit breaker. The `fastgrnn` backend `neural-router.ts` loads. |
+| `crates/ruvector-router-core` (+cli/ffi/wasm) | Vector DB + inference engine: HNSW (<0.5 ms p50 — upstream self-reported), SIMD distance, 4–32× quantization. Basis for a semantic route-cache and Path 4's gateway core. |
 | `METAHARNESS-README.md` + `ADR-265..267` | Darwin-mode evolutionary parameter optimization + 3-tier validation with signed witnesses — reusable for retraining/validating router artifacts against operator-local models. |
 
 ---

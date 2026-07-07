@@ -1,0 +1,13 @@
+{
+  "name": "ruflo-local",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Local-first tiered LLM routing kit — learned routing live in scripts/gateway-server.mjs, powered by scripts/lib/*.mjs",
+  "license": "MIT",
+  "optionalDependencies": {
+    "@ruvector/rvf": "^0.2.3",
+    "@ruvector/ruvllm": "^2.6.0",
+    "@metaharness/router": "^0.3.2"
+  },
+  "comment": "Zero-runtime-config kit; the only deps are OPTIONAL packages, all loaded via dynamic import with graceful fallback. @ruvector/rvf — a real .rvf routing corpus (JSONL fallback when absent). @ruvector/ruvllm — the IN-PROCESS prompt embedder (no CLI/argv, so a private prompt never hits the process table). @metaharness/router (phase 10) — the cost-optimal k-NN model router, evaluated OFFLINE head-to-head vs ruflo's router in scripts/lib/metaharness-eval.mjs (never a second live learner). Tests use Node's built-in runner (node --test), no test framework."
+}

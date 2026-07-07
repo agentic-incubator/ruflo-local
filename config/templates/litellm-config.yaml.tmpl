@@ -1,0 +1,139 @@
+# =============================================================================
+# LiteLLM gateway config — tiered, local-first routing with budgets + metrics
+# Tiers are MODEL ALIASES. Clients only ever ask for tier-fast / tier-heavy /
+# tier-frontier; this file decides what actually serves them.
+# Docs: https://docs.litellm.ai/docs/proxy/config_settings
+#
+# GENERATED FILE — do not edit litellm-config.yaml by hand. Edit this .tmpl and
+# config/model-sets.json, then run `make render` (scripts/render-configs.mjs).
+# The {{TIER_*_MODEL}} placeholders are filled with the hardware-appropriate
+# local tag (Apple-Silicon => MLX build, else plain) at render time.
+# =============================================================================
+
+model_list:
+
+  # ---- TIER 1: local-fast (default workhorse, ~90% of traffic) -------------
+  - model_name: tier-fast
+    litellm_params:
+      model: {{TIER_FAST_MODEL}}  # 35B MoE, ~3B active (8 of 256 experts/token) — SWE-bench ~73.4% (vendor-reported, not an independent leaderboard); same fast speed as the old 30B coder, far stronger. Local tag is selected per-hardware by scripts/render-configs.mjs (see docs/guide/reference/hardware-and-models.md).
+      api_base: os.environ/OLLAMA_API_BASE
+    model_info:
+      serving_tier: local-fast
+      locality: local
+
+  # Pilot candidate — Ornith-1.0-35B MoE (~3B active, MIT; DeepReinforce, see docs/guide/reference/hardware-and-models.md).
+  # Agentic/tool-use-tuned "self-scaffolding" coder; vendor SWE-bench Verified 75.6 (unconfirmed).
+  # To A/B against the default: either swap the `model:` line above, OR uncomment this as a
+  # SECOND tier-fast deployment (same alias ⇒ LiteLLM load-balances/fails over between the two).
+  # Ollama serves the HF GGUF directly (no separate registry tag needed):
+  #   ollama pull hf.co/deepreinforce-ai/Ornith-1.0-35B-GGUF
+  # - model_name: tier-fast
+  #   litellm_params:
+  #     model: ollama_chat/hf.co/deepreinforce-ai/Ornith-1.0-35B-GGUF   # Q4_K_M ~20GB / Q5_K_M ~25GB
+  #     api_base: os.environ/OLLAMA_API_BASE
+  #   model_info: { tier: local-fast, locality: local }
+
+  # ---- TIER 2: local-heavy (bigger local model; via Ollama by default) -----
+  - model_name: tier-heavy
+    litellm_params:
+      model: {{TIER_HEAVY_MODEL}}         # dense 27B — SWE-bench ~77.2% (vendor-reported), the true "heavy" (all params active per token). Local tag is selected per-hardware by scripts/render-configs.mjs (Apple-Silicon MLX build vs plain; see docs/guide/reference/hardware-and-models.md).
+      api_base: os.environ/OLLAMA_API_BASE
+    model_info:
+      serving_tier: local-heavy
+      locality: local
+
+  # Optional second deployment of tier-heavy on vLLM (--profile gpu).
+  # Same alias ⇒ LiteLLM load-balances / fails over between the two.
+  # - model_name: tier-heavy
+  #   litellm_params:
+  #     model: openai/QuantTrio/Qwen3.6-27B-AWQ   # AWQ build for vLLM (matches VLLM_MODEL in .env.example)
+  #     api_base: os.environ/VLLM_API_BASE
+  #     api_key: "none"
+  #   model_info: { tier: local-heavy, locality: local }
+
+  # ---- TIER 3: frontier (budget-capped; ≤10% of traffic by design) ---------
+  # Multiple deployments under ONE alias ⇒ automatic failover between
+  # Claude → GPT → Gemini if one provider errors or exhausts its budget.
+  # §4 budget-steering: per-deployment max_budget + HTTP-429-skip is the
+  # FAIL-CLOSED BACKSTOP (over-budget deployment skipped → failover → error when
+  # all exhausted). DEMOTION *before* hard-stop (50/75/90 rungs, mask at 100%
+  # except pinned/escalation-forced) is router-side — see scripts/budget-snapshot.sh
+  # and docs/guide/reference/budgets-and-tradeoffs.md → Budget-steered routing (§4).
+  # rpm/tpm below add token-rate burst protection alongside the USD cap.
+  - model_name: tier-frontier
+    litellm_params:
+      model: anthropic/claude-opus-4-8
+      api_key: os.environ/ANTHROPIC_API_KEY
+      max_budget: 3.00            # USD — this deployment stops serving when hit
+      budget_duration: 1d         # 1s…1mo; resets each period
+      rpm: 6                      # gentle rate cap for agentic bursts
+      tpm: 60000
+    model_info:
+      serving_tier: frontier
+      locality: cloud
+
+  - model_name: tier-frontier
+    litellm_params:
+      model: openai/gpt-4.1
+      api_key: os.environ/OPENAI_API_KEY
+      max_budget: 2.00
+      budget_duration: 1d
+      rpm: 6                      # (rationale in the tier-3 header comment above)
+      tpm: 60000
+    model_info:
+      serving_tier: frontier
+      locality: cloud
+
+  - model_name: tier-frontier
+    litellm_params:
+      model: gemini/gemini-2.5-pro
+      api_key: os.environ/GEMINI_API_KEY
+      max_budget: 2.00
+      budget_duration: 1d
+      rpm: 6                      # (rationale in the tier-3 header comment above)
+      tpm: 60000
+    model_info:
+      serving_tier: frontier
+      locality: cloud
+
+  # ---- Privacy-pinned alias: can NEVER escalate off-box ---------------------
+  # Point sensitive projects here; no fallback chain leaves localhost.
+  - model_name: tier-private
+    litellm_params:
+      model: {{TIER_PRIVATE_MODEL}}         # dense 27B, local-only, privacy-pinned. Local tag is selected per-hardware by scripts/render-configs.mjs (see docs/guide/reference/hardware-and-models.md).
+      api_base: os.environ/OLLAMA_API_BASE
+    model_info:
+      serving_tier: private
+      locality: local
+
+litellm_settings:
+  # Fall-through ladder: local-fast → local-heavy → frontier.
+  # tier-private is deliberately ABSENT from every chain.
+  fallbacks:
+    - tier-fast:  ["tier-heavy", "tier-frontier"]
+    - tier-heavy: ["tier-frontier"]
+  # Long prompt overflows a small local context? Up-shift automatically.
+  context_window_fallbacks:
+    - tier-fast: ["tier-heavy", "tier-frontier"]
+  num_retries: 2
+  request_timeout: 120
+  # Metrics + spend tracking (Prometheus is open-source since LiteLLM v1.80.0).
+  # "otel" emits OpenTelemetry GenAI spans (gen_ai.* conventions) to the collector
+  # (OTEL_EXPORTER/OTEL_ENDPOINT set in docker-compose.yml) — limitations §7.
+  callbacks: ["prometheus", "otel"]
+  track_cost_callback: true
+  # Emit remaining-budget gauges even for idle keys (needed by the §4 budget work).
+  # Requires a recent LiteLLM; silently ignored on images that predate the key.
+  prometheus_initialize_budget_metrics: true
+  # Privacy: keep prompt/response bodies out of logs (metadata/spans still emitted)
+  turn_off_message_logging: true
+
+router_settings:
+  routing_strategy: simple-shuffle
+  enable_pre_call_checks: false    # DISABLED: LiteLLM router bug (BerriAI/litellm#11330) — _pre_call_checks rejects unmapped local ollama tags (e.g. MLX-suffixed local builds) as "not mapped" even though litellm.get_model_info() DOES map them, so any no-fallback local tier (tier-private) 400s. Documented workaround. context_window_fallbacks still fires reactively on overflow.
+  allowed_fails: 3                 # breaker: cooldown a deployment after 3 fails/min
+  cooldown_time: 30
+
+general_settings:
+  master_key: os.environ/LITELLM_MASTER_KEY
+  database_url: os.environ/DATABASE_URL

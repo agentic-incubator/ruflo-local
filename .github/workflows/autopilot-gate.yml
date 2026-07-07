@@ -1,0 +1,282 @@
+# =============================================================================
+# autopilot-gate.yml — base-scoped CI for ruflo-local's autopilot pipeline.
+#
+# Autonomy is `pr_ci`: each phase opens a PR into `develop` and autopilot will
+# only squash-merge it when the REQUIRED check below is green. Because the real
+# local tiers are multi-GB Ollama models that CANNOT run on GitHub hosted
+# runners, coverage is LAYERED:
+#
+#   1. static      — REQUIRED. The merge authority. No models, hardware-neutral:
+#                    yamllint + shellcheck + jq + node --check/--test + compose config.
+#                    Mark THIS job as the required status check on `develop`.
+#   2. local-smoke — OPTIONAL/advisory. Installs Ollama, caches a tiny stand-in
+#                    model, renders the `ci` model variant, and runs the LOCAL-tier
+#                    subset of the smoke test (fast/heavy/privacy-pin/fallback).
+#                    No secrets. Proves the gateway wiring end-to-end.
+#   3. escalation  — OPTIONAL. Same as local-smoke PLUS the frontier tier, and it
+#                    ONLY runs when a provider key is present as a repo secret.
+#                    Skips gracefully (never fails) when no secret is configured.
+#
+# Flexibility knobs:
+#   * The CI stand-in model is one line in config/model-sets.json (variants.ci).
+#   * Plumb OPENAI_API_KEY / ANTHROPIC_API_KEY / GEMINI_API_KEY as repo secrets to
+#     light up the escalation job; leave them unset and it self-skips.
+# =============================================================================
+name: autopilot-gate
+
+on:
+  pull_request:
+    branches: [develop, main]
+  push:
+    branches: [develop, main]
+  workflow_dispatch:
+
+# One in-flight run per ref; newer pushes cancel older ones.
+concurrency:
+  group: autopilot-gate-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  # ── 1. STATIC GATE — the required merge authority (no models, ~1 min) ───────
+  static:
+    name: static
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+          cache: npm
+
+      - name: Install dependencies (@ruvector/rvf — optional; enables the real .rvf recorder tests)
+        run: npm ci --no-audit --no-fund
+
+      - name: Install lint tooling
+        run: |
+          python3 -m pip install --quiet yamllint
+          # shellcheck and jq are preinstalled on ubuntu-latest.
+          shellcheck --version
+          jq --version
+
+      - name: Lint — yaml + shell + json + node syntax
+        run: |
+          yamllint -c .yamllint \
+            docker-compose.yml \
+            config/gateways/litellm-config.yaml \
+            config/observability/prometheus.yml \
+            config/observability/grafana-datasources.yml \
+            config/observability/grafana-dashboards-provisioning.yml \
+            config/observability/otel-collector-config.yaml \
+            config/gateways/helicone-config.yaml
+          shellcheck smoke-test.sh scripts/*.sh
+          jq -e . \
+            config/routing/ruflo-tiers.json \
+            config/routing/router-policy.example.json \
+            config/gateways/bifrost-config.json \
+            config/observability/dashboards/routing-decisions.json >/dev/null
+          # Tolerant Node ESM syntax check — no-op until scripts/lib/ exists (Phase 1).
+          rc=0
+          if [ -d scripts/lib ]; then
+            while IFS= read -r f; do node --check "$f" || rc=1; done \
+              < <(find scripts/lib -name "*.mjs")
+          fi
+          exit $rc
+
+      - name: Build — render + compose config (+ cargo once gateway/ exists)
+        run: |
+          # render is arch-aware (committed configs are one arch's snapshot), so we don't
+          # diff against committed output here — we assert the pipeline RENDERS cleanly and
+          # the resulting merged Compose file is valid. Use the ci variant for a stable check.
+          RUFLO_MODEL_VARIANT=ci node scripts/render-configs.mjs
+          docker compose config -q
+          if [ -f gateway/Cargo.toml ]; then
+            cargo build --release --manifest-path gateway/Cargo.toml
+          fi
+
+      - name: Unit tests — node:test (+ cargo test once gateway/ exists)
+        run: |
+          rc=0
+          if ls scripts/lib/__tests__/*.test.mjs >/dev/null 2>&1; then
+            node --test scripts/lib/__tests__/*.test.mjs || rc=1
+          else
+            echo "no scripts/lib/__tests__/*.test.mjs yet — skipped (Phase 1 adds them)"
+          fi
+          if [ -f gateway/Cargo.toml ]; then
+            cargo test --manifest-path gateway/Cargo.toml || rc=1
+          fi
+          exit $rc
+
+  # ── preflight — detect whether a frontier provider key is available ─────────
+  # Secrets can't be read in job-level `if:`, so we surface it as an output here.
+  preflight:
+    name: preflight
+    runs-on: ubuntu-latest
+    outputs:
+      has_frontier_key: ${{ steps.probe.outputs.has_frontier_key }}
+    steps:
+      - id: probe
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        run: |
+          if [ -n "$OPENAI_API_KEY" ] || [ -n "$ANTHROPIC_API_KEY" ] || [ -n "$GEMINI_API_KEY" ]; then
+            echo "has_frontier_key=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_frontier_key=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  # ── 2. LOCAL SMOKE — Ollama + tiny cached model, LOCAL tiers only, no secrets ─
+  # Matrixed across all three gateway profiles, through the real docker-compose stack
+  # (route-gateway included) — not a raw `docker run litellm`, so router.mjs/reflex.mjs/
+  # recorder.mjs's live wiring is actually exercised in CI, on every profile.
+  # fail-fast:false: an unrelated failure on one profile must not cancel the other two —
+  # we want independent signal from litellm/bifrost/helicone every run.
+  local-smoke:
+    name: local-smoke (${{ matrix.profile }})
+    runs-on: ubuntu-latest
+    # Advisory: not a required check. Skip on draft PRs to save runner minutes.
+    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false }}
+    strategy:
+      fail-fast: false
+      matrix:
+        profile: [litellm, bifrost, helicone]
+    env:
+      OLLAMA_MODELS: ${{ github.workspace }}/.ollama-models
+      GW: http://localhost:4000
+      LITELLM_MASTER_KEY: sk-local-master
+      # docker-compose.ci.yml adds fake-upstream (gives the escalation/fall-through
+      # drills real signal on bifrost/helicone too) and bind-mounts OLLAMA_MODELS into
+      # the ollama service so actions/cache below actually persists pulled blobs.
+      COMPOSE_FILE: docker-compose.yml:docker-compose.ci.yml
+      # smoke-test.sh: which gateway is active — drives addressing (Helicone routes by
+      # path) and which escalation/fall-through mechanism applies.
+      GATEWAY_KIND: ${{ matrix.profile }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+
+      - name: Resolve CI stand-in model tag
+        id: model
+        run: echo "tag=$(node -e "console.log(require('./config/model-sets.json').variants.ci.fast)")" >> "$GITHUB_OUTPUT"
+
+      - name: Cache Ollama model blobs
+        uses: actions/cache@v6
+        with:
+          path: ${{ env.OLLAMA_MODELS }}
+          key: ollama-${{ steps.model.outputs.tag }}-${{ hashFiles('config/model-sets.json') }}
+
+      - name: Render the CI gateway config (tiny stand-in for every tier)
+        run: RUFLO_MODEL_VARIANT=ci node scripts/render-configs.mjs
+
+      - name: Bring up Ollama + fake-upstream, pull the stand-in model
+        run: |
+          mkdir -p "$OLLAMA_MODELS"
+          docker compose up -d ollama fake-upstream
+          for i in $(seq 1 60); do
+            curl -sf http://localhost:11434/api/version && break || sleep 2
+            if [ "$i" = 60 ]; then echo "::error::Ollama never became healthy"; docker compose logs ollama; exit 1; fi
+          done
+          docker compose exec -T ollama ollama pull "${{ steps.model.outputs.tag }}"
+
+      - name: Bring up route-gateway + ${{ matrix.profile }} (make gateway-up)
+        run: |
+          OLLAMA_API_BASE=http://fake-upstream:9100 make gateway-up PROFILE=${{ matrix.profile }}
+          # /health/liveliness is LiteLLM's own endpoint; /v1/models is Bifrost's real
+          # OpenAI-compatible models list (confirmed live); bare /health is Helicone's
+          # real health endpoint (confirmed against its own test suite — /health/liveliness
+          # and /v1/models both 404 there since it parses any other unrecognized path
+          # segment as a provider name, not a real health check).
+          for i in $(seq 1 90); do
+            (curl -sf -o /dev/null "$GW/health/liveliness" || curl -sf -o /dev/null "$GW/v1/models" || curl -sf -o /dev/null "$GW/health") && break
+            sleep 2
+            if [ "$i" = 90 ]; then
+              echo "::error::route-gateway/${{ matrix.profile }} never became healthy"
+              docker compose logs route-gateway "${{ matrix.profile }}"
+              exit 1
+            fi
+          done
+
+      - name: Local smoke (no escalation)
+        run: SMOKE_LOCAL_ONLY=1 bash ./smoke-test.sh
+
+      - name: Gateway logs on failure
+        if: failure()
+        run: docker compose logs route-gateway "${{ matrix.profile }}" fake-upstream ollama || true
+
+  # ── 3. ESCALATION — full smoke incl. frontier; only when a key is configured ─
+  # Same matrix + compose-stack approach as local-smoke, plus real provider keys so the
+  # escalation drill has a real judge/frontier to escalate to.
+  escalation:
+    name: escalation (${{ matrix.profile }})
+    needs: preflight
+    if: ${{ needs.preflight.outputs.has_frontier_key == 'true' }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        profile: [litellm, bifrost, helicone]
+    env:
+      OLLAMA_MODELS: ${{ github.workspace }}/.ollama-models
+      GW: http://localhost:4000
+      LITELLM_MASTER_KEY: sk-local-master
+      COMPOSE_FILE: docker-compose.yml:docker-compose.ci.yml
+      GATEWAY_KIND: ${{ matrix.profile }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+
+      - name: Resolve CI stand-in model tag
+        id: model
+        run: echo "tag=$(node -e "console.log(require('./config/model-sets.json').variants.ci.fast)")" >> "$GITHUB_OUTPUT"
+
+      - name: Cache Ollama model blobs
+        uses: actions/cache@v6
+        with:
+          path: ${{ env.OLLAMA_MODELS }}
+          key: ollama-${{ steps.model.outputs.tag }}-${{ hashFiles('config/model-sets.json') }}
+
+      - name: Render the CI gateway config
+        run: RUFLO_MODEL_VARIANT=ci node scripts/render-configs.mjs
+
+      - name: Bring up Ollama + fake-upstream, pull the stand-in model
+        run: |
+          mkdir -p "$OLLAMA_MODELS"
+          docker compose up -d ollama fake-upstream
+          for i in $(seq 1 60); do
+            curl -sf http://localhost:11434/api/version && break || sleep 2
+            if [ "$i" = 60 ]; then echo "::error::Ollama never became healthy"; docker compose logs ollama; exit 1; fi
+          done
+          docker compose exec -T ollama ollama pull "${{ steps.model.outputs.tag }}"
+
+      - name: Bring up route-gateway + ${{ matrix.profile }} with real provider keys
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        run: |
+          OLLAMA_API_BASE=http://fake-upstream:9100 make gateway-up PROFILE=${{ matrix.profile }}
+          for i in $(seq 1 90); do
+            (curl -sf -o /dev/null "$GW/health/liveliness" || curl -sf -o /dev/null "$GW/v1/models") && break
+            sleep 2
+            if [ "$i" = 90 ]; then
+              echo "::error::route-gateway/${{ matrix.profile }} never became healthy"
+              docker compose logs route-gateway "${{ matrix.profile }}"
+              exit 1
+            fi
+          done
+
+      - name: Full smoke (incl. frontier escalation)
+        run: bash ./smoke-test.sh
+
+      - name: Gateway logs on failure
+        if: failure()
+        run: docker compose logs route-gateway "${{ matrix.profile }}" fake-upstream ollama || true

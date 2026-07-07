@@ -46,6 +46,8 @@ logs/
 prometheus-data/
 grafana-data/
 grafana-storage/
+# docker-compose.ci.yml's local fallback bind-mount path (no OLLAMA_MODELS set)
+.ci-ollama-models/
 
 # ------------------------------------------------------------------------------
 # Build artifacts & archives
@@ -92,3 +94,7 @@ venv/
 Thumbs.db
 Desktop.ini
 .autopilot/queued/
+agentdb.rvf*
+
+# ruvector runtime corpus (real .rvf store — regenerated, not committed)
+.ruvector/

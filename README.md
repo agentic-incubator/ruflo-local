@@ -4,15 +4,21 @@ Send **~90% of your LLM traffic to open-weight models on your own hardware** and
 
 ![Local-first AI traffic optimization](local-first-ai-traffic-optimization.png)
 
+> *Illustrative.* Default routing is **structural**, not a bespoke learned router: your client picks a tier alias and the gateway ladder + per-provider budget caps make the local/frontier split emergent — the ~90/10 is a **target**, not an enforced governor (a learned dial is the optional RouteLLM profile). `vLLM` is an optional NVIDIA-GPU profile (Ollama is the default); Bifrost/Helicone are experimental variants (LiteLLM is the supported default). "~10 minutes" is after model pulls complete.
+
 ## Quick start
 
 ```bash
-cp .env.example .env        # add keys; pick your gateway via COMPOSE_PROFILES
+cp .env.example .env        # add keys; default gateway is LiteLLM — to switch, use `make gateway-up PROFILE=<name>` (see Gateway Variants)
+make render                 # render gateway configs to YOUR hardware (Apple Silicon→MLX, else→GGUF)
+                            #   non-Apple-Silicon: make render RUFLO_MODEL_VARIANT=gguf
 docker compose up -d        # default gateway (LiteLLM) + Ollama + Prometheus + Grafana
-./smoke-test.sh             # verify tiers, fall-through, privacy pin, metrics
+./smoke-test.sh             # verify tiers, fall-through, privacy pin, metrics (auto-sources .env)
 ```
 
-Full prerequisites (Docker, Ollama, optional ruflo/ruvector/vLLM) → **[docs/guide/reference/prerequisites.md](docs/guide/reference/prerequisites.md)**.
+> **Why `make render`?** The committed gateway configs are generated from `config/templates/*.tmpl` with hardware-specific local model tags (`tier-heavy`/`tier-private` use the MLX build on Apple Silicon, the plain build elsewhere). Skip it on a non-Apple-Silicon host and those tiers point at a `-mlx` tag you never pulled. Needs **Node.js**.
+
+Full prerequisites (Docker, Ollama, Node.js, `python3`, optional ruflo/ruvector/vLLM) → **[docs/guide/reference/prerequisites.md](docs/guide/reference/prerequisites.md)**.
 
 ## Docs
 

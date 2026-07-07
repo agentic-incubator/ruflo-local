@@ -24,8 +24,8 @@ Every non-obvious claim is tagged so nothing here is taken on faith:
 | 🟡 **Inferred** | A reasonable conclusion from confirmed facts, *not* directly stated. Treat as a hypothesis to test. |
 | ⛔ **Not stated** | metaharness's public README does **not** document this. Do not assume it works until you verify against the actual package. |
 
-Sources used: this repo's `litellm-config.yaml`, `ruflo-tiers.json`,
-`router-policy.example.json`, `docs/guide/reference/tiers-and-routing.md`; and the
+Sources used: this repo's `config/gateways/litellm-config.yaml`, `config/routing/ruflo-tiers.json`,
+`config/routing/router-policy.example.json`, `docs/guide/reference/tiers-and-routing.md`; and the
 metaharness README at `github.com/ruvnet/metaharness` (fetched 2026-07-03).
 
 ---
@@ -34,12 +34,12 @@ metaharness README at `github.com/ruvnet/metaharness` (fetched 2026-07-03).
 
 ### ruflo-local (this repo) — the serving substrate ✅
 
-A local-first tiered LLM gateway. Confirmed from `litellm-config.yaml`, clients only ever
+A local-first tiered LLM gateway. Confirmed from `config/gateways/litellm-config.yaml`, clients only ever
 ask for **model aliases**; the gateway decides what physically serves each one:
 
 | Alias | Serves (default) | Locality | Guardrail |
 |-------|------------------|----------|-----------|
-| `tier-fast` | `ollama_chat/qwen3-coder:30b-a3b` (MoE, ~3B active) | local | workhorse, ~90% of traffic |
+| `tier-fast` | `ollama_chat/qwen3.6:35b-a3b` (MoE, ~3B active) | local | workhorse, ~90% of traffic |
 | `tier-heavy` | `ollama_chat/qwen3.6:27b` (dense) | local | up-tier target |
 | `tier-frontier` | Claude Opus → GPT-4.1 → Gemini 2.5 Pro | cloud | per-deployment `max_budget` + `budget_duration`, auto-failover |
 | `tier-private` | `ollama_chat/qwen3.6:27b`, **local-only** | local | ✅ deliberately absent from every fallback chain — can never escalate off-box |
@@ -86,7 +86,7 @@ Both projects say the same thing at different layers:
 
 They're not redundant; they're **stacked concerns**: *which model* (metaharness) vs. *how
 that model is actually served, capped, and observed* (ruflo-local). And they already share
-a substrate — ✅ this repo ships `ruvector.db` and its `router-policy.example.json`
+a substrate — ✅ this repo ships `ruvector.db` and its `config/routing/router-policy.example.json`
 references `ruvector-router-core` HNSW; metaharness's optional router training rides on
 `@ruvector/tiny-dancer`. Same ruvector layer, both sides.
 
@@ -175,7 +175,7 @@ and emits the Prometheus/OTel spans.
 ### Path B — the router emits fixed provider names (fallback)
 
 If `route(query)` only returns names like `qwen`/`glm`/`opus` and you can't change them, add
-matching aliases to `litellm-config.yaml` so the gateway answers those names too. You
+matching aliases to `config/gateways/litellm-config.yaml` so the gateway answers those names too. You
 already have the pattern — every `tier-*` entry is just a `model_name` alias; add a
 `model_name: opus` pointing at the same budget-capped Anthropic deployment, a
 `model_name: qwen` at the local one, etc. The router keeps its vocabulary; the gateway
@@ -198,7 +198,7 @@ selection vs. enforcement. Note the trade-off already flagged in this repo's tie
 an upstream router chooses the tier, **ruflo's own per-model bandit labels blur** (it can't
 see which physical model the gateway ultimately picked). If you lean on metaharness's
 router, disable ruflo's learned path to avoid two learners disagreeing, and keep ruflo's
-**tier floors** from `router-policy.example.json` as a safety net (tool-driven / multi-turn
+**tier floors** from `config/routing/router-policy.example.json` as a safety net (tool-driven / multi-turn
 agent types should never drop below `tier-heavy`).
 
 ---
@@ -235,7 +235,7 @@ Beyond routing, three metaharness pieces map onto this repo:
 4. **Pick the router seam (§5)** and turn off the loser to avoid dueling learners.
 5. **Add `harness mcp-scan` to CI** against `.mcp.json`.
 6. **Re-benchmark, don't trust the numbers.** Both the 56× (metaharness) and the local
-   `cost_per_m_tok: 0` in `ruflo-tiers.json` are starting points — re-measure on your
+   `cost_per_m_tok: 0` in `config/routing/ruflo-tiers.json` are starting points — re-measure on your
    hardware via `docs/guide/reference/observability.md`.
 
 ---
@@ -249,4 +249,4 @@ Beyond routing, three metaharness pieces map onto this repo:
 - 🟡 That Darwin/Weight-EFT distilled weights serve cleanly via this repo's Ollama/vLLM path.
 - 🟡 Whether the stacked-router option's latency/behavior is acceptable — measure it.
 - Everything about ruflo-local's tiers, aliases, budgets, and fallbacks **is** ✅ confirmed
-  in `litellm-config.yaml` and the guide.
+  in `config/gateways/litellm-config.yaml` and the guide.

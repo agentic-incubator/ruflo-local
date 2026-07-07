@@ -1,0 +1,131 @@
+{
+  "_meta": {
+    "purpose": "FROZEN, hash-pinned held-out eval set for the promotion gate (Phase 8). The promotion gate scores a challenger against these fixed champion baselines and must NOT regress against them. `sha256` is the tamper-evident pin over the canonical `cases` array (promotion-gate.mjs frozenHash) — the gate refuses a set whose hash does not match, so the yardstick cannot be quietly edited to force a promotion.",
+    "version": "v1",
+    "frozen_at": "2026-07-05",
+    "regeneration_warning": "Do NOT regenerate casually. Re-freezing after seeing challenger results defeats the held-out guarantee; only re-freeze with a NEW version file (…-v2.json) and a documented reason.",
+    "sha256": "53babb49cfaab88f0c1b9dd5ec78d0e119f5ff94be8f71ebc90a375ae618a197"
+  },
+  "cases": [
+    {
+      "id": "held-01",
+      "prompt_hash": "sha256:0f1c2d3e4a5b6c7d8e9f0a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f",
+      "task_class": "bugfix",
+      "champion": {
+        "quality": 0.86,
+        "cost": 42,
+        "humanRelevance": 0.85
+      }
+    },
+    {
+      "id": "held-02",
+      "prompt_hash": "sha256:1a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f708192a3b4c5d6e7f809",
+      "task_class": "explain",
+      "champion": {
+        "quality": 0.9,
+        "cost": 38,
+        "humanRelevance": 0.9
+      }
+    },
+    {
+      "id": "held-03",
+      "prompt_hash": "sha256:2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f708192a3b4c5d6e7f8091a",
+      "task_class": "refactor",
+      "champion": {
+        "quality": 0.83,
+        "cost": 45,
+        "humanRelevance": 0.82
+      }
+    },
+    {
+      "id": "held-04",
+      "prompt_hash": "sha256:3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f708192a3b4c5d6e7f8091a2b",
+      "task_class": "prove",
+      "champion": {
+        "quality": 0.94,
+        "cost": 60,
+        "humanRelevance": 0.93
+      }
+    },
+    {
+      "id": "held-05",
+      "prompt_hash": "sha256:4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c",
+      "task_class": "bugfix",
+      "champion": {
+        "quality": 0.88,
+        "cost": 40,
+        "humanRelevance": 0.87
+      }
+    },
+    {
+      "id": "held-06",
+      "prompt_hash": "sha256:5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d",
+      "task_class": "explain",
+      "champion": {
+        "quality": 0.91,
+        "cost": 36,
+        "humanRelevance": 0.91
+      }
+    },
+    {
+      "id": "held-07",
+      "prompt_hash": "sha256:6f708192a3b4c5d6e7f8091a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e",
+      "task_class": "refactor",
+      "champion": {
+        "quality": 0.84,
+        "cost": 44,
+        "humanRelevance": 0.84
+      }
+    },
+    {
+      "id": "held-08",
+      "prompt_hash": "sha256:708192a3b4c5d6e7f8091a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f",
+      "task_class": "prove",
+      "champion": {
+        "quality": 0.93,
+        "cost": 58,
+        "humanRelevance": 0.92
+      }
+    },
+    {
+      "id": "held-09",
+      "prompt_hash": "sha256:8192a3b4c5d6e7f8091a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f70",
+      "task_class": "bugfix",
+      "champion": {
+        "quality": 0.87,
+        "cost": 41,
+        "humanRelevance": 0.86
+      }
+    },
+    {
+      "id": "held-10",
+      "prompt_hash": "sha256:92a3b4c5d6e7f8091a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f7081",
+      "task_class": "explain",
+      "champion": {
+        "quality": 0.89,
+        "cost": 37,
+        "humanRelevance": 0.89
+      }
+    },
+    {
+      "id": "held-11",
+      "prompt_hash": "sha256:a3b4c5d6e7f8091a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f708192",
+      "task_class": "refactor",
+      "champion": {
+        "quality": 0.85,
+        "cost": 43,
+        "humanRelevance": 0.85
+      }
+    },
+    {
+      "id": "held-12",
+      "prompt_hash": "sha256:b4c5d6e7f8091a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f708192a3",
+      "task_class": "prove",
+      "champion": {
+        "quality": 0.95,
+        "cost": 62,
+        "humanRelevance": 0.94
+      }
+    }
+  ]
+}

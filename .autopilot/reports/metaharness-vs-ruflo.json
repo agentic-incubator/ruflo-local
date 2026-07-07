@@ -1,0 +1,43 @@
+{
+  "meta": {
+    "generated_for": "autopilot phase 10 (D7)",
+    "seed_source": "tests/quality-prompts.jsonl (seed; .ruvector/routing-corpus.rvf corpus not row-iterable)",
+    "n_total": 15,
+    "n_train": 10,
+    "n_heldout": 5,
+    "metaharness_backend": "@metaharness/router",
+    "embedder": "real in-process (@ruvector/ruvllm)",
+    "qualityBar": 0.7,
+    "eval_prices": {
+      "tier-fast": 0.05,
+      "tier-heavy": 0.15,
+      "tier-frontier": 45
+    },
+    "note": "OFFLINE seed evaluation. Ground-truth per-tier quality is derived from difficultyForClass (synthetic-but-principled), NOT production telemetry — a tie on this tiny corpus is expected (DRACO n≈20 ceiling). STRUCTURAL TILT (disclosed): the synthetic ground-truth ceilings equal ruflo's own tier thresholds AND ruflo learns difficultyForClass (the same function generating the labels), so this offline setup is tilted TOWARD ruflo (near-oracle by construction). A 'keep' here is therefore weak evidence that metaharness is inferior — only that it does not clearly win. Re-run against a materialized .ruvector routing corpus (real telemetry) to remove this tilt and get a production-grade verdict."
+  },
+  "ruflo": {
+    "mean_quality": 1,
+    "mean_cost": 0.15,
+    "mean_qpd": 6.6667,
+    "pct_oracle_quality": 1,
+    "pct_oracle_qpd": 0.333
+  },
+  "metaharness": {
+    "mean_quality": 1,
+    "mean_cost": 0.09,
+    "mean_qpd": 14.6667,
+    "pct_oracle_quality": 1,
+    "pct_oracle_qpd": 0.733
+  },
+  "oracle": {
+    "mean_quality": 1,
+    "mean_cost": 0.05,
+    "mean_qpd": 20
+  },
+  "recommendation": "keep",
+  "rationale": "keep: metaharness LED on held-out q/$ (mean Δ 8.000, p=0.007) — the cost-optimal router correctly took cheaper adequate tiers — but the evidence is SYNTHETIC (seed corpus, not production telemetry), so we do NOT disable ruflo's learner on this basis. Re-run against a materialized .ruvector corpus (past the DRACO n≈20 ceiling) to promote this to an adopt.",
+  "metaharness_led_on_point_estimate": true,
+  "paired_qpd_delta": 8,
+  "p_value": 0.0072,
+  "significant": true
+}

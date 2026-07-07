@@ -54,22 +54,65 @@ services:
               capabilities: [gpu]
     restart: unless-stopped
 
+  # --- route-gateway: the single host-facing seam on :4000 --------------------
+  # Always on (no `profiles:`), like otel-collector below. Phase 0 of the
+  # live-routing-cutover pipeline (docs/research/live-routing-gateway-rationale.md)
+  # stood this up as a pure passthrough proxy; phase 1 wires router.mjs's route() in
+  # (config/routing/router-policy.example.json must be mounted for its category
+  # floors to resolve — without it every agentType silently floors to tier-fast).
+  # Transparently fronts whichever of litellm/bifrost/helicone is the active profile;
+  # phase 2 wired reflex.mjs in, phase 3 wired recorder.mjs in.
+  # litellm/bifrost/helicone no longer bind host :4000 — only route-gateway does,
+  # uniformly across all three, so exactly one container ever claims that port.
+  # Phase 4: built from a glibc image (not the musl-based Alpine tag) so recorder.mjs's
+  # @ruvector/rvf + @ruvector/ruvllm native bindings resolve, and the corpus lives
+  # on a named volume so DRACO rows survive a container restart.
+  route-gateway:
+    build:
+      context: .
+      dockerfile: config/gateways/route-gateway.Dockerfile
+    container_name: route-gateway
+    working_dir: /app
+    ports:
+      - "4000:4000"
+    volumes:
+      - ./scripts:/app/scripts:ro
+      - ./config:/app/config:ro
+      - route-gateway-corpus:/app/.ruvector
+    environment:
+      - GATEWAY_PORT=4000
+      - GATEWAY_UPSTREAM_URL=${GATEWAY_UPSTREAM_URL:-http://litellm:4000}
+      # Phase 5: route-gateway's own OTel span per decision (ruflo.route.* attributes) —
+      # the SAME collector endpoint litellm's OTEL_EXPORTER=otlp_http already posts
+      # gen_ai.* spans to, so both flow through one shared traces pipeline.
+      - OTEL_ENDPOINT=${OTEL_ENDPOINT:-http://otel-collector:4318/v1/traces}
+      # Phase 7 fix: reflex.mjs's judge/escalate calls run INSIDE route-gateway via
+      # GatewayClient, authenticating back to litellm with THIS key — without it,
+      # GatewayClient fell back to config.mjs's hardcoded "sk-local-master" default,
+      # which litellm rejects (401) whenever .env sets a custom key, same as litellm's
+      # own environment line below. Silently broke every real (non-mocked) judge/
+      # escalation call since phase 2 shipped; only surfaced once phase 7's live
+      # escalation drill actually exercised it against a real frontier key.
+      - LITELLM_MASTER_KEY=${LITELLM_MASTER_KEY:-sk-local-master}
+    command: ["node", "/app/scripts/gateway-server.mjs"]
+    restart: unless-stopped
+
   # --- The gateway (DEFAULT): routing, fallbacks, budgets, metrics ----------
   # One of three MUTUALLY-EXCLUSIVE gateways, selected by COMPOSE_PROFILES
   # (litellm | bifrost | helicone). litellm is the default — the shipped .env sets
   # COMPOSE_PROFILES=litellm so `docker compose up -d` still yields LiteLLM.
+  # Internal-only now (no host port) — route-gateway (above) owns host :4000 and
+  # reaches this over the compose network by its service name.
   # See docs/guide/reference/gateway-variants.md.
   litellm:
-    image: ghcr.io/berriai/litellm:main-stable
+    image: ghcr.io/berriai/litellm:v1.83.14-stable  # PINNED (was floating main-stable=1.90.3, which hit the "healthy Ollama but router registers 0 deployments" bug — BerriAI/litellm#11330; main-stable is also deprecated as of 2026-06-30). Pin a content tag per LiteLLM guidance.
     container_name: litellm
     profiles: ["litellm"]
     depends_on:
       - litellm_db
       - otel-collector
-    ports:
-      - "4000:4000"
     volumes:
-      - ./litellm-config.yaml:/app/config.yaml:ro
+      - ./config/gateways/litellm-config.yaml:/app/config.yaml:ro
     environment:
       - LITELLM_MASTER_KEY=${LITELLM_MASTER_KEY:-sk-local-master}
       - DATABASE_URL=postgresql://litellm:litellm@litellm_db:5432/litellm
@@ -101,51 +144,66 @@ services:
 
   # --- Alternative gateway: Bifrost (Go, µs-class overhead, native OTel) ---
   # Activate INSTEAD of litellm:  COMPOSE_PROFILES=bifrost docker compose up -d
-  # Mutually exclusive with litellm/helicone — all three claim host :4000, and only
-  # one profile is active at a time. Preserves the four-tier alias vocabulary and the
-  # tier-private no-fallback privacy pin (see bifrost-config.json). Bifrost listens on
-  # :8080 internally; we map it to the same :4000 seam so clients don't change.
+  # Mutually exclusive with litellm/helicone — route-gateway forwards to exactly one
+  # (via GATEWAY_UPSTREAM_URL), so only one profile is ever the active upstream. Preserves
+  # the four-tier alias vocabulary and the tier-private no-fallback privacy pin (see
+  # bifrost-config.json). Bifrost listens on :8080 internally — no host port at all;
+  # route-gateway (host :4000) reaches it by service name.
   # EXPERIMENTAL: verify the image tag + config schema against your Bifrost release.
+  # entrypoint/command bypass the image's OWN docker-entrypoint.sh: its parse_args()
+  # infinite-loops on any flag it doesn't literally recognize as --port/--host (confirmed
+  # via `sh -x` trace — the catch-all branch `set -- "$@" "$1"; shift` never shrinks $#),
+  # which -app-dir triggers every time, hanging the container forever with zero log
+  # output. Calling /app/main directly (verified working: starts in ~3.5s, /health
+  # returns {"status":"ok"}) sidesteps the vendor bug entirely — logic unaffected, only
+  # the broken shell wrapper is skipped.
   bifrost:
     image: maximhq/bifrost:v1.5.2
     container_name: bifrost
     profiles: ["bifrost"]
     depends_on:
       - otel-collector
-    ports:
-      - "4000:8080"
     volumes:
-      - ./bifrost-config.json:/app/data/config.json:ro
+      - ./config/gateways/bifrost-config.json:/app/data/config.json:ro
     environment:
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
       - GEMINI_API_KEY=${GEMINI_API_KEY:-}
       - OLLAMA_API_BASE=${OLLAMA_API_BASE:-http://ollama:11434}
-    command: ["-app-dir", "/app/data"]
+    entrypoint: ["/app/main"]
+    command: ["-app-dir", "/app/data", "-port", "8080", "-host", "0.0.0.0", "-log-level", "info", "-log-style", "pretty"]
     restart: unless-stopped
 
   # --- Alternative gateway: Helicone AI Gateway (Rust, native OTel + budgets/cache) ---
   # Activate INSTEAD of litellm/bifrost:  COMPOSE_PROFILES=helicone docker compose up -d
-  # Mutually exclusive — claims host :4000 like the others. Mirrors the four tiers as
-  # named routers (clients call /router/tier-<x>); tier-private routes to one local
-  # model with no fallback (privacy pin). Listens :8080 internally, mapped to :4000.
+  # Mutually exclusive — route-gateway forwards to exactly one upstream, like the others.
+  # Mirrors the four tiers as named routers (clients call /router/tier-<x>); tier-private
+  # routes to one local model with no fallback (privacy pin). Listens :8080 internally —
+  # no host port at all; route-gateway (host :4000) reaches it by service name.
   # EXPERIMENTAL: verify the image tag + config schema against your Helicone release.
+  # Tag corrected 2026-07-07: the previously-pinned v1.0.0 was never a real Docker Hub
+  # tag (confirmed: "manifest unknown" on pull) — Helicone/ai-gateway has never
+  # published semver Docker tags with a "v" prefix; 0.2.0-beta.30 (no "v") is the
+  # latest real tag as of this writing (GitHub releases use "v0.2.0-beta.N", Docker
+  # Hub strips the "v" — verify both still align before bumping further). Command also
+  # corrected: this image sets NO entrypoint (bare CMD ["/usr/local/bin/ai-gateway"]),
+  # so `command: ["--config", ...]` alone was executing "--config" as if it were the
+  # binary — confirmed via `docker inspect`. Full binary path restores the real CLI
+  # (`ai-gateway --help`: -c/--config <path>).
   helicone:
-    image: helicone/ai-gateway:v1.0.0
+    image: helicone/ai-gateway:0.2.0-beta.30
     container_name: helicone
     profiles: ["helicone"]
     depends_on:
       - otel-collector
-    ports:
-      - "4000:8080"
     volumes:
-      - ./helicone-config.yaml:/app/config.yaml:ro
+      - ./config/gateways/helicone-config.yaml:/app/config.yaml:ro
     environment:
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
       - GEMINI_API_KEY=${GEMINI_API_KEY:-}
       - OLLAMA_API_BASE=${OLLAMA_API_BASE:-http://ollama:11434}
-    command: ["--config", "/app/config.yaml"]
+    command: ["/usr/local/bin/ai-gateway", "--config", "/app/config.yaml"]
     restart: unless-stopped
 
   # --- Optional: learned 90/10 router (RouteLLM, lm-sys) --------------------
@@ -157,7 +215,7 @@ services:
   routellm:
     build:
       context: .
-      dockerfile: routellm.Dockerfile
+      dockerfile: config/gateways/routellm.Dockerfile
     container_name: routellm
     profiles: ["router"]
     depends_on:
@@ -180,11 +238,17 @@ services:
   # OTel Collector — receives GenAI spans (gen_ai.* conventions) from the gateway
   # and exposes span-derived metrics on :8889 for Prometheus (limitations §7).
   # Image tag pinned deliberately (the GenAI conventions are still evolving).
+  # 0.116.0's published arm64 image is broken (`exec /otelcol-contrib: no such
+  # file or directory` on container start — reproduces via a bare `docker run
+  # --version`, independent of this repo's config/volumes). 0.155.0 verified
+  # working: builds/runs on arm64, and correctly ingests this repo's actual
+  # collector config (spanmetrics dimensions + debug exporter both confirmed
+  # live during the live-routing-cutover pipeline's phase-5 verification).
   otel-collector:
-    image: otel/opentelemetry-collector-contrib:0.116.0
+    image: otel/opentelemetry-collector-contrib:0.155.0
     container_name: otel-collector
     volumes:
-      - ./otel-collector-config.yaml:/etc/otelcol-contrib/config.yaml:ro
+      - ./config/observability/otel-collector-config.yaml:/etc/otelcol-contrib/config.yaml:ro
     ports:
       - "4317:4317"   # OTLP gRPC
       - "4318:4318"   # OTLP HTTP (gateway posts here)
@@ -197,7 +261,7 @@ services:
     ports:
       - "9090:9090"
     volumes:
-      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./config/observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - prom_data:/prometheus
     restart: unless-stopped
 
@@ -210,7 +274,15 @@ services:
       - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:-admin}
       - GF_AUTH_ANONYMOUS_ENABLED=false
     volumes:
-      - ./grafana-datasources.yml:/etc/grafana/provisioning/datasources/datasources.yml:ro
+      - ./config/observability/grafana-datasources.yml:/etc/grafana/provisioning/datasources/datasources.yml:ro
+      # Phase 6: the routing-decisions dashboard (tier share, escalation rate, budget
+      # rungs, DRACO-growth proxy, judge-score buckets) — file-based provisioning only,
+      # mirroring the datasources mount above, so the dashboard survives `docker compose
+      # down -v`. The provisioning pointer and the dashboard JSONs mount at DIFFERENT
+      # paths (the pointer's own options.path) — mounting the dashboards dir directly
+      # onto /etc/grafana/provisioning/dashboards would shadow the pointer file itself.
+      - ./config/observability/grafana-dashboards-provisioning.yml:/etc/grafana/provisioning/dashboards/dashboards.yml:ro
+      - ./config/observability/dashboards:/etc/grafana/dashboards:ro
       - grafana_data:/var/lib/grafana
     restart: unless-stopped
 
@@ -220,3 +292,4 @@ volumes:
   litellm_pg:
   prom_data:
   grafana_data:
+  route-gateway-corpus:

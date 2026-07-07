@@ -74,7 +74,7 @@
 Four bodies of prior art inform the design and validate feasibility of the 90/10 target:
 
 - **RouteLLM (Ong et al., ICLR 2025, arXiv:2406.18665)** — routers trained on preference data; **>2× cost reduction without quality loss**, up to **85% on MT-Bench**; formalizes a threshold calibrated to a **target strong-model call rate**; transfers across model pairs without retraining.
-- **FrugalGPT (Chen, Zaharia & Zou, 2023, arXiv:2305.05176)** — cascade: try cheap, score the answer, escalate on low score. Matched the best single LLM at **up to 98% lower cost**; case study sent **only 16.6% of queries to GPT-4** — proof a ~10–17% frontier share is attainable.
+- **FrugalGPT (Chen, Zaharia & Zou, 2023, arXiv:2305.05176)** — cascade: try cheap, score the answer, escalate on low score. Matched the best single LLM at **up to 98% lower cost**; a case study reportedly routed **only ~16.6% of queries to GPT-4** — proof a ~10–17% frontier share is attainable. (The 98% is in the paper's abstract; the ~16.6% routing-share figure is from its case study.)
 - **LiteLLM proxy (BerriAI)** — reference implementation for the budget semantics: per-provider/model `max_budget` + `budget_duration`, fail-closed enforcement, ordered + context-window fallbacks, Prometheus remaining-budget gauge, OTel callback.
 - **OpenTelemetry GenAI semantic conventions** — `gen_ai.*` span attributes; adopting these makes routing telemetry consumable by Grafana/Datadog/Jaeger without adapters.
 
@@ -186,7 +186,7 @@ A slow controller (EWMA over a rolling window) reads observed frontier share `s(
   "tiers": {
     "codemod":     { "locality": "local",    "provider": "none" },
     "local-fast":  { "locality": "local",    "provider": "openai-compat",
-                     "base_url": "http://localhost:11434/v1", "model": "qwen3-coder:30b-a3b-q4_K_M", "max_tokens": 2048 },
+                     "base_url": "http://localhost:11434/v1", "model": "qwen3.6:35b-a3b-q4_K_M", "max_tokens": 2048 },
     "local-heavy": { "locality": "local",    "provider": "openai-compat",
                      "base_url": "http://gpubox:8000/v1", "model": "QuantTrio/Qwen3.6-27B-AWQ", "max_tokens": 8192 },
     "frontier":    { "locality": "frontier", "provider": "anthropic", "model": "claude-opus-4-8", "max_tokens": 16384,
@@ -228,7 +228,7 @@ Phased: **Phase 0** overlay → **Phase 1** schema v2 + openai-compat dispatch +
 ## 10. References
 
 - **[R1]** Ong, I. et al. *RouteLLM.* ICLR 2025. arXiv:2406.18665 — threshold-calibrated strong/weak routing; >2× cost reduction; cross-pair transfer.
-- **[R2]** Chen, L., Zaharia, M., Zou, J. *FrugalGPT.* 2023. arXiv:2305.05176 — cascade + post-query scorer; up to 98% cost reduction; 16.6% to GPT-4.
+- **[R2]** Chen, L., Zaharia, M., Zou, J. *FrugalGPT.* 2023. arXiv:2305.05176 — cascade + post-query scorer; up to 98% cost reduction (abstract); ~16.6% of queries to GPT-4 (reported, case study).
 - **[L1]** LiteLLM — Budget Routing: https://docs.litellm.ai/docs/proxy/provider_budget_routing
 - **[L2]** LiteLLM — Prometheus metrics: https://docs.litellm.ai/docs/proxy/prometheus
 - **[L3]** LiteLLM — Config settings & reliability: https://docs.litellm.ai/docs/proxy/config_settings · https://docs.litellm.ai/docs/proxy/reliability

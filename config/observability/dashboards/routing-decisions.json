@@ -1,0 +1,99 @@
+{
+  "title": "Routing Decisions (live-routing-cutover)",
+  "uid": "ruflo-routing-decisions",
+  "tags": ["ruflo", "route-gateway"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "time": { "from": "now-6h", "to": "now" },
+  "panels": [
+    {
+      "id": 1,
+      "title": "Tier share over time",
+      "description": "Share of requests served by each tier, from route-gateway's own gen_ai_calls_total (spanmetrics-derived, phase 5).",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "fieldConfig": { "defaults": { "custom": { "stacking": { "mode": "normal" }, "fillOpacity": 60 } }, "overrides": [] },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "Prometheus" },
+          "expr": "sum by (ruflo_route_tier) (rate(gen_ai_calls_total{service_name=\"route-gateway\"}[5m]))",
+          "legendFormat": "{{ruflo_route_tier}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "title": "Escalation rate",
+      "description": "Fraction of served decisions where reflex.mjs escalated to tier-frontier (ruflo.route.escalated=true).",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "fieldConfig": { "defaults": { "unit": "percentunit" }, "overrides": [] },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "Prometheus" },
+          "expr": "(sum(rate(gen_ai_calls_total{service_name=\"route-gateway\", ruflo_route_escalated=\"true\"}[5m])) OR vector(0)) / (sum(rate(gen_ai_calls_total{service_name=\"route-gateway\"}[5m])) OR vector(1))",
+          "legendFormat": "escalation rate",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "title": "Budget demotion rungs",
+      "description": "Which budget rung (0/0.25/0.5/0.75/mask/n-a) tier-frontier requests were steered at, current + history.",
+      "type": "state-timeline",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "fieldConfig": { "defaults": {}, "overrides": [] },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "Prometheus" },
+          "expr": "sum by (ruflo_route_budget_rung) (rate(gen_ai_calls_total{service_name=\"route-gateway\"}[5m]))",
+          "legendFormat": "rung {{ruflo_route_budget_rung}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "title": "DRACO corpus growth rate (rows/hour)",
+      "description": "Proxy metric: recorder.mjs fires a fire-and-forget DRACO write alongside every served decision's span (phase 3), so route-gateway's own request-count rate approximates the real corpus growth rate — there is no direct corpus-row-count Prometheus metric today.",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "Prometheus" },
+          "expr": "sum(rate(gen_ai_calls_total{service_name=\"route-gateway\"}[1h])) * 3600",
+          "legendFormat": "rows/hour (proxy)",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "title": "Judge score distribution",
+      "description": "Count of served decisions per judge-score bucket (ruflo.route.judge_score_bucket, phase 6 — the raw continuous score is span-only, never a Prometheus label; 'unscored' covers tier-private/non-judged tiers).",
+      "type": "barchart",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 16 },
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "fieldConfig": { "defaults": {}, "overrides": [] },
+      "transformations": [{ "id": "reduce", "options": { "reducers": ["lastNotNull"] } }],
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "Prometheus" },
+          "expr": "sum by (ruflo_route_judge_score_bucket) (gen_ai_calls_total{service_name=\"route-gateway\"})",
+          "legendFormat": "{{ruflo_route_judge_score_bucket}}",
+          "instant": true,
+          "refId": "A"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,272 @@
+// =============================================================================
+// recorder.mjs — log every routing decision as a DRACO row into a ruvector RVF corpus.
+//
+// STATUS: LIVE — called from scripts/gateway-server.mjs's request path (phase 3 of the
+// live-routing-cutover pipeline wired RoutingRecorder in, 2026-07-06). See
+// docs/research/live-routing-gateway-rationale.md and docs/guide/reference/architecture-rfc.md (Path 2).
+//
+// D5 (no-backfill): from day one — while still routing per-category — every request's
+// decision is recorded WITH the prompt embedding, so the per-question learner (phases
+// 4–5) has real training data the moment its gate wants it, zero backfill.
+//
+// D11 / phase 9 (ruflo 3.22): every row carries the REAL outcome (`success` true OR false).
+// Upstream ruflo used to hardcode PostToolUse success:true, hiding every failure — so the
+// learner/oracle only ever saw accepted answers and could not learn from mistakes. Here
+// `success` is REQUIRED and never defaulted to true: a failure is recorded as a corpus
+// NEGATIVE (success:false), including a reflex escalation (the local tier's answer was judged
+// inadequate). Negatives carry the SAME privacy guarantees as positives — prompt_hash +
+// embedding only, never raw text.
+//
+// EMBEDDINGS (phase 6/9): the default embedder is a REAL in-process ruvllm model; the recorder
+// NEVER writes stub/hash vectors (they are meaningless to the per-question learner), and it
+// honors RUFLO_REQUIRE_REAL_EMBEDDINGS end-to-end via resolveRecorderEmbedder().
+//
+// Storage is a REAL ruvector `.rvf` store via the @ruvector/rvf SDK (HNSW-indexed,
+// crash-safe, single-writer) — NOT an ad-hoc JSON file. When the SDK is absent it
+// degrades to a portable JSONL corpus (same DRACO rows). `kind` says which path is live.
+//
+// PRIVACY (two invariants):
+//   1. Raw prompt text is NEVER stored — only a sha256 `prompt_hash` + the embedding.
+//   2. Raw prompt text is NEVER logged off-process either. The default embedder runs
+//      IN-PROCESS via @ruvector/ruvllm (no CLI, no argv — an argv would be visible in
+//      `ps`/`/proc`/audit logs). If ruvllm isn't installed the default throws asking the
+//      caller to inject an embedder — it never silently falls back to an argv-leaking path.
+//
+// DEDUP SEMANTICS (by design): the RVF id is the full prompt_hash, so the same prompt
+// recorded twice updates in place (latest decision wins) — one point per unique prompt,
+// which is exactly the granularity the per-question learner keys on. Two DIFFERENT
+// prompts always get distinct ids (full 256-bit hash → no truncation collision) and grow
+// the count. `count()` reports UNIQUE prompts on both backends so they stay interchangeable.
+// =============================================================================
+
+import { createHash } from "node:crypto";
+import { existsSync, mkdirSync, appendFileSync, readFileSync } from "node:fs";
+import { dirname } from "node:path";
+import { createRequire } from "node:module";
+import { str } from "./config.mjs";
+
+/** DRACO row fields recorded per decision (the embedding rides as the vector). */
+export const DRACO_FIELDS = ["prompt_hash", "category", "tier", "judge_score", "cost", "latency", "escalated", "success"];
+
+/** sha256 hex of the prompt — the stored id, never the raw text. */
+export function promptHash(prompt) {
+  return createHash("sha256").update(String(prompt)).digest("hex");
+}
+
+/**
+ * Validate a DRACO record: fields present AND well-typed, plus a non-empty numeric
+ * embedding. Returns { ok, errors }.
+ */
+export function validateDracoRow(row) {
+  const errors = [];
+  const isNum = (v) => typeof v === "number" && Number.isFinite(v);
+  if (!/^[0-9a-f]{64}$/.test(String(row.prompt_hash ?? ""))) errors.push("prompt_hash must be a sha256 hex string");
+  if (typeof row.category !== "string" || !row.category) errors.push("category must be a non-empty string");
+  if (typeof row.tier !== "string" || !row.tier) errors.push("tier must be a non-empty string");
+  if (!(isNum(row.judge_score) || row.judge_score === null)) errors.push("judge_score must be a number or null");
+  if (!isNum(row.cost) || row.cost < 0) errors.push("cost must be a number >= 0");
+  if (!isNum(row.latency) || row.latency < 0) errors.push("latency must be a number >= 0");
+  if (typeof row.escalated !== "boolean") errors.push("escalated must be a boolean");
+  if (typeof row.success !== "boolean") errors.push("success must be a boolean (the REAL outcome — never hardcode success:true; a failure is a corpus negative)");
+  if (!Array.isArray(row.embedding) || row.embedding.length === 0) errors.push("embedding must be a non-empty array");
+  else if (!row.embedding.every(isNum)) errors.push("embedding must contain only finite numbers");
+  return { ok: errors.length === 0, errors };
+}
+
+/** A corpus NEGATIVE = a decision whose REAL outcome was a failure (success:false). ruflo 3.22
+ *  fixed the old hardcoded success:true that hid every failure from the learner/oracle. */
+export function isNegativeOutcome(row) {
+  return row?.success === false;
+}
+
+/**
+ * Map a reflex() result to the recordable outcome fields. An escalation means the LOCAL tier's
+ * answer was judged inadequate → a NEGATIVE for that local decision (success:false), even if the
+ * finally-served frontier answer is fine. This is exactly the negative signal the learner needs.
+ * Privacy: this reads only the reflex verdict flags, never the raw prompt/answer.
+ */
+export function outcomeFromReflex(reflexResult) {
+  const escalated = !!reflexResult?.escalated;
+  return { escalated, success: !escalated };
+}
+
+/**
+ * In-process ruvllm embedder (recommended default) — pure, deterministic, offline, and
+ * crucially NO argv/CLI (so a private prompt never appears in the process table). Loads
+ * @ruvector/ruvllm lazily via createRequire (its ESM entry ships extensionless imports);
+ * if it isn't installed, embed() throws a clear message rather than leaking via a CLI.
+ */
+/** Is the in-process ruvllm embedder installed? Resolves the module without loading it. */
+export function isRuvllmAvailable() {
+  try {
+    createRequire(import.meta.url).resolve("@ruvector/ruvllm");
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export function ruvllmEmbedder() {
+  let llm = null;
+  return async function embed(text) {
+    if (!llm) {
+      let mod;
+      try {
+        mod = createRequire(import.meta.url)("@ruvector/ruvllm");
+      } catch {
+        throw new Error(
+          "recorder: no embedder — install @ruvector/ruvllm for the in-process embedder, or inject `embed` into RoutingRecorder.open(). " +
+            "The recorder never shells out to embed (a raw prompt on argv would leak to the process table)."
+        );
+      }
+      const RuvLLM = mod.RuvLLM ?? mod.default?.RuvLLM ?? mod.default;
+      llm = new RuvLLM();
+    }
+    const out = await llm.embed(String(text));
+    return Array.isArray(out) ? out : out.embedding ?? out.vector ?? out.data;
+  };
+}
+
+/**
+ * Pure embedder decision for the RECORDER (no-stub ALWAYS). Unlike train-router's embedderDecision
+ * — which may fall back to hashEmbed when RUFLO_REQUIRE_REAL_EMBEDDINGS is unset — the corpus must
+ * never carry stub vectors, so this returns "ruvllm" or THROWS. The flag only sharpens the message.
+ * @returns {"ruvllm"} · throws when no real embedder is available.
+ */
+export function recorderEmbedderDecision({ ruvllmAvailable, requireReal }) {
+  if (ruvllmAvailable) return "ruvllm";
+  throw new Error(
+    `recorder: no real embedder (@ruvector/ruvllm absent)${requireReal ? " and RUFLO_REQUIRE_REAL_EMBEDDINGS=1" : ""} — ` +
+      "inject `embed` into RoutingRecorder.open() or install @ruvector/ruvllm. The recorder never writes stub embeddings (meaningless to the per-question learner)."
+  );
+}
+
+/**
+ * Resolve the recorder's runtime-DEFAULT embedder: the real in-process ruvllm model when present,
+ * else THROW (honoring RUFLO_REQUIRE_REAL_EMBEDDINGS end-to-end). An explicitly injected `embed`
+ * bypasses this entirely (tests use a deterministic fake).
+ */
+export function resolveRecorderEmbedder(env = process.env) {
+  const requireReal = str("RUFLO_REQUIRE_REAL_EMBEDDINGS", "", env) === "1";
+  recorderEmbedderDecision({ ruvllmAvailable: isRuvllmAvailable(), requireReal }); // throws if none
+  return ruvllmEmbedder();
+}
+
+// ── Store backends (exported for direct testing) ─────────────────────────────
+
+/** A real .rvf store via @ruvector/rvf. Throws if the SDK is genuinely absent (import fails). */
+export async function rvfStore(path, dimension) {
+  let RvfDatabase;
+  try {
+    ({ RvfDatabase } = await import("@ruvector/rvf"));
+  } catch (err) {
+    // ONLY an absent SDK is a fallback trigger; anything else is a real error to surface.
+    const e = new Error("RVF_SDK_ABSENT");
+    e.cause = err;
+    throw e;
+  }
+  // Operational errors (locked/corrupt/permission) propagate — they must NOT silently
+  // downgrade a healthy corpus to JSONL and split it (reviewer P2).
+  const db = existsSync(path)
+    ? await RvfDatabase.open(path)
+    : await RvfDatabase.create(path, { dimensions: dimension, metric: "cosine" });
+  return {
+    kind: "rvf",
+    path,
+    async ingest(entry) { await db.ingestBatch([entry]); },
+    async count() { return (await db.status()).totalVectors; },
+    async close() { await db.close(); },
+  };
+}
+
+/** Portable JSONL fallback. count() = UNIQUE prompt_hash, matching the RVF dedup-by-id semantics. */
+export function jsonlStore(rvfPath) {
+  const path = /\.rvf$/.test(rvfPath) ? rvfPath.replace(/\.rvf$/, ".jsonl") : `${rvfPath}.jsonl`;
+  return {
+    kind: "jsonl",
+    path,
+    async ingest(entry) { appendFileSync(path, JSON.stringify(entry) + "\n"); },
+    async count() {
+      if (!existsSync(path)) return 0;
+      const ids = new Set();
+      for (const line of readFileSync(path, "utf8").split("\n")) {
+        if (line) ids.add(JSON.parse(line).id);
+      }
+      return ids.size;
+    },
+    async close() {},
+  };
+}
+
+/**
+ * Open (or create) the routing corpus — real .rvf when @ruvector/rvf is installed, else
+ * the portable JSONL fallback. The fallback fires ONLY on an absent SDK; an operational
+ * RVF error propagates (never a silent mid-run split).
+ */
+export async function openCorpus({ corpusPath, dimension = 768, env = process.env } = {}) {
+  const path = corpusPath ?? str("ROUTING_CORPUS", ".ruvector/routing-corpus.rvf", env);
+  mkdirSync(dirname(path), { recursive: true });
+  try {
+    return await rvfStore(path, dimension);
+  } catch (err) {
+    if (err?.message === "RVF_SDK_ABSENT") return jsonlStore(path);
+    throw err;
+  }
+}
+
+/**
+ * Records routing decisions into the corpus. Runs on EVERY request regardless of routing
+ * grain — this is what makes per-category-first non-throwaway.
+ */
+export class RoutingRecorder {
+  #store;
+  #embed;
+  #dimension;
+
+  constructor(store, embed, dimension) {
+    this.#store = store;
+    this.#embed = embed;
+    this.#dimension = dimension;
+  }
+
+  static async open({ corpusPath, dimension = 768, embed, env = process.env } = {}) {
+    // Default to the REAL in-process embedder (throws if absent, honoring RUFLO_REQUIRE_REAL_EMBEDDINGS);
+    // an explicitly injected `embed` bypasses resolution entirely. Resolved lazily so injection wins.
+    const embedder = embed ?? resolveRecorderEmbedder(env);
+    const store = await openCorpus({ corpusPath, dimension, env });
+    return new RoutingRecorder(store, embedder, dimension);
+  }
+
+  get kind() { return this.#store.kind; }
+  get path() { return this.#store.path; }
+
+  /**
+   * Embed + record one decision. `decision` carries the raw prompt (embedded in-process,
+   * never stored/logged) plus routing metadata. Returns the validated DRACO row.
+   */
+  async record(decision) {
+    const { prompt, category, tier, judge_score, cost, latency, escalated, success } = decision;
+    // The REAL outcome must be supplied — NEVER hardcode success:true (ruflo 3.22). A missing
+    // outcome is a bug in the caller, not a "success"; refuse it so failures can't be silently lost.
+    if (typeof success !== "boolean") {
+      throw new Error("recorder: `success` (the real pass/fail outcome) must be provided as a boolean — never hardcode success:true (ruflo 3.22); use outcomeFromReflex() or pass the actual result.");
+    }
+    const embedding = await this.#embed(prompt);
+    if (!Array.isArray(embedding) || embedding.length !== this.#dimension) {
+      throw new Error(`recorder: embedding dim ${embedding?.length} != store dim ${this.#dimension} (set dimension to match your embedder)`);
+    }
+    const prompt_hash = promptHash(prompt);
+    const row = { prompt_hash, embedding, category, tier, judge_score, cost, latency, escalated, success };
+
+    const { ok, errors } = validateDracoRow(row);
+    if (!ok) throw new Error(`recorder: invalid DRACO row — ${errors.join("; ")}`);
+
+    const { embedding: _e, ...metadata } = row; // metadata carries prompt_hash, never the raw prompt
+    // id = the FULL prompt_hash (no truncation → no birthday collision across distinct prompts).
+    await this.#store.ingest({ id: prompt_hash, vector: embedding, metadata });
+    return row;
+  }
+
+  count() { return this.#store.count(); }
+  close() { return this.#store.close(); }
+}

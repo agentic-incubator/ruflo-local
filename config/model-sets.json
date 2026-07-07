@@ -1,0 +1,8 @@
+{
+  "_note": "Local tier models per hardware variant. render-configs.mjs picks a variant from uname -m (arm64 => mlx) unless RUFLO_MODEL_VARIANT (mlx|gguf|ci) overrides. Values are BARE ollama tags; each gateway template applies its own provider prefix. tier-fast stays GGUF in both hardware variants (qwen3.6:35b-a3b-q4_K_M runs on Apple-Silicon Metal and no 35b-mlx is assumed pulled); only heavy/private differ (mlx vs plain). The 'ci' variant is a TINY stand-in (all tiers => one ~400MB model) so the gateway wiring can be smoke-tested on GitHub hosted runners that cannot hold the real multi-GB models — swap ci.* to change the CI stand-in in one place.",
+  "variants": {
+    "mlx":  { "fast": "qwen3.6:35b-a3b-q4_K_M", "heavy": "qwen3.6:27b-mlx", "private": "qwen3.6:27b-mlx" },
+    "gguf": { "fast": "qwen3.6:35b-a3b-q4_K_M", "heavy": "qwen3.6:27b",     "private": "qwen3.6:27b" },
+    "ci":   { "fast": "qwen2.5:0.5b",           "heavy": "qwen2.5:0.5b",    "private": "qwen2.5:0.5b" }
+  }
+}

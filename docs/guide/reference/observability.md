@@ -40,7 +40,7 @@ Adopting the [OTel GenAI semantic conventions](https://opentelemetry.io/docs/spe
 | `gen_ai.system` **or** `gen_ai.provider.name` | Which provider actually served it (anthropic / openai / gemini / local). The attribute name is version-dependent — older LiteLLM/semconv emits `gen_ai.system`, newer `gen_ai.provider.name`; the collector captures both. |
 | `gen_ai.operation.name` | The operation (e.g. `chat`) |
 
-**Wiring** (already in this kit): `litellm-config.yaml` sets `callbacks: ["prometheus", "otel"]`; `docker-compose.yml` points the gateway at the collector via `OTEL_EXPORTER=otlp_http` + `OTEL_ENDPOINT=http://otel-collector:4318/v1/traces` (the `/v1/traces` path is required — LiteLLM sends the endpoint verbatim); the collector's `spanmetrics` connector (namespace `gen_ai`) turns spans into metrics tagged by `gen_ai.request.model` and provider (`gen_ai.system`/`gen_ai.provider.name`). Config: [`otel-collector-config.yaml`](../../../otel-collector-config.yaml).
+**Wiring** (already in this kit): `config/gateways/litellm-config.yaml` sets `callbacks: ["prometheus", "otel"]`; `docker-compose.yml` points the gateway at the collector via `OTEL_EXPORTER=otlp_http` + `OTEL_ENDPOINT=http://otel-collector:4318/v1/traces` (the `/v1/traces` path is required — LiteLLM sends the endpoint verbatim); the collector's `spanmetrics` connector (namespace `gen_ai`) turns spans into metrics tagged by `gen_ai.request.model` and provider (`gen_ai.system`/`gen_ai.provider.name`). Config: [`config/observability/otel-collector-config.yaml`](../../../config/observability/otel-collector-config.yaml).
 
 > [!WARNING]
 > **Pin your versions.** The OTel GenAI attributes are still marked **Development** in the semantic-convention registry — the collector image is pinned (`otel/opentelemetry-collector-contrib:0.116.0`) so an upstream rename can't silently break your dashboards. Bump it deliberately, not via `:latest`.
@@ -92,7 +92,7 @@ Fire 8–16 concurrent `tier-fast` requests; if latency collapses, that's Ollama
 
 - **Privacy by architecture** — ~90% of prompts never leave your hardware; `tier-private` makes "never" structural. Gateway message-body logging is off by default in this kit.
 - **Cost ceiling, not cost hope** — daily caps per provider that *block*, plus per-tool virtual-key budgets.
-- **Availability better than frontier-only** — two local backends + three frontier providers = five independent serving paths.
+- **Availability better than frontier-only** — two local models (plus the private one) served by a single Ollama backend, plus three independent frontier providers. Note the local models share one Ollama process, so local redundancy is at the model level, not separate serving backends.
 - **Observability parity with SaaS gateways** — tokens, spend, latency, fallbacks per model in Grafana, on your box.
 
 > [!WARNING]

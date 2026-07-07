@@ -7,7 +7,8 @@
 
 receivers:
   # LiteLLM's "otel" callback ships spans here (OTEL_EXPORTER=otlp_http,
-  # OTEL_ENDPOINT=http://otel-collector:4318 — see docker-compose.yml).
+  # OTEL_ENDPOINT=http://otel-collector:4318/v1/traces — see docker-compose.yml; the
+  # /v1/traces path is REQUIRED by LiteLLM's OTEL exporter).
   otlp:
     protocols:
       grpc:
@@ -31,6 +32,18 @@ connectors:
       - name: gen_ai.system
       - name: gen_ai.provider.name
       - name: gen_ai.operation.name
+      # Phase 5 (live-routing-cutover): route-gateway's own span per decision
+      # (scripts/lib/otel-span.mjs) — the same connector, no second exporter. Only the
+      # low-cardinality dimensions are promoted to metric labels; ruflo.route.floor/
+      # .category/.judge_score stay span-only attributes (unbounded/continuous values
+      # make poor Prometheus labels).
+      - name: ruflo.route.tier
+      - name: ruflo.route.escalated
+      - name: ruflo.route.budget_rung
+      # Phase 6: judge_score itself stays span-only (continuous value, not label-safe), but
+      # its bucketed form (5 fixed ranges + "unscored") is low-cardinality and backs the
+      # Grafana dashboard's judge-score-distribution panel.
+      - name: ruflo.route.judge_score_bucket
 
 exporters:
   # Prometheus scrape target (prometheus.yml → job_name: otel-collector).

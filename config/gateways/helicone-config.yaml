@@ -1,0 +1,117 @@
+# =============================================================================
+# Helicone AI Gateway config — mirrors this kit's four tiers as named ROUTERS,
+# for the `helicone` compose profile (COMPOSE_PROFILES=helicone). Helicone is the
+# Rust, native-OTel alternative with rich budgets/caching — see
+# docs/guide/reference/gateway-variants.md.
+#
+# EXPERIMENTAL TEMPLATE — verify keys against https://docs.helicone.ai/ai-gateway/config
+# (custom-provider base_url, budget units, fallback-disable, cache backend all evolve).
+# What MUST hold regardless of schema: the four tier routers exist, and the private
+# router routes to a SINGLE LOCAL model with NO other models / no fallback (the privacy pin).
+#
+# ROUTER NAMES DROP THE "tier-" PREFIX (confirmed live 2026-07-07): Helicone's router
+# IDs are regex-capped at 12 chars (ai-gateway/src/config/mod.rs's ROUTER_ID_REGEX,
+# ^[A-Za-z0-9_-]{1,12}$) — "tier-frontier" is 13 chars and cannot exist as a router ID
+# at all. Rather than a one-off exception for just that tier, ALL FOUR routers here are
+# named fast/heavy/frontier/private (no "tier-" prefix) — Helicone is the one gateway
+# where the client-facing name differs from the tier-fast/tier-heavy/tier-frontier/
+# tier-private vocabulary litellm/bifrost use; see gateway-variants.md's addressing note.
+#
+# Schema corrected 2026-07-07 (confirmed against the real v0.2.0-beta.30 image + its
+# ai-gateway/src/config/balance.rs source): `load-balance.chat.strategy: weighted` is
+# ProviderWeighted — it picks among PROVIDERS via a `providers: [{provider,weight}]`
+# field, not specific models, so a `models:` list under it was invalid. Each tier needs
+# ONE specific model, which is `model-latency` (ModelLatency, field `models: [modelId]`)
+# — the same strategy tier-frontier already correctly used. Also: the provider needs
+# its own `models:` list of the real (unprefixed) tags it exposes, and
+# `cache-store: {type: disabled}` isn't a real variant — omit the block entirely instead.
+#
+# PROVIDER KEY MUST BE LITERALLY "ollama" (confirmed 2026-07-07 against ai-gateway/src/
+# types/provider.rs + middleware/mapper/registry.rs source): the previous "ollama-local"
+# name deserialized into the untagged InferenceProvider::Named(String) catch-all, which
+# only has a HARDCODED converter allowlist (mistral/groq/deepseek/xai/hyperbolic) —
+# "ollama-local" matched none of them, so every chat completion failed with "Converter
+# not present for OpenAI(ChatCompletions) -> OpenAICompatible{...}". Ollama is actually
+# a FIRST-CLASS native InferenceProvider variant with its own registered OllamaConverter
+# — naming the key exactly "ollama" resolves to that variant instead of the untagged
+# fallback. The provider config struct (GlobalProviderConfig) also has no `type` field
+# at all — only `models`/`base-url`/`version` — so the old `type: openai-compatible`
+# line was always inert.
+#
+# GENERATED FILE — do not edit helicone-config.yaml by hand. Edit this .tmpl and
+# config/model-sets.json, then run `make render` (scripts/render-configs.mjs). The
+# {{TIER_*_MODEL}} placeholders are filled with the hardware-appropriate local tag
+# (Apple-Silicon => MLX build, else plain) at render time.
+#
+# ADDRESSING NOTE: Helicone routes by router name — clients call
+#   http://localhost:4000/router/fast  (vs LiteLLM/Bifrost model="tier-fast").
+# =============================================================================
+
+providers:
+  # Native Ollama provider — key MUST be literally "ollama" (see header note). Unlike
+  # LiteLLM this is not read from OLLAMA_API_BASE — host-native Ollama users edit
+  # base-url to http://host.docker.internal:11434/v1. http://ollama:11434/v1 is real
+  # Ollama for mlx/gguf; the CI variant points it at fake-upstream (docker-compose.ci.yml)
+  # instead — see scripts/render-configs.mjs.
+  ollama:
+    base-url: http://ollama:11434/v1
+    # A provider must declare the real (unprefixed) model IDs it exposes — confirmed
+    # live against the real schema, which "missing field `models`" pointed at. Routers
+    # below reference these via the ollama/<tag> prefixed form; this list is the raw
+    # tags themselves.
+    models:
+      - qwen3.6:35b-a3b-q4_K_M
+      - qwen3.6:27b-mlx
+      - qwen3.6:27b-mlx
+
+routers:
+  # --- Tier 1: local-fast (default workhorse) --- (router name: "tier-" prefix dropped, see header note)
+  fast:
+    load-balance:
+      chat:
+        strategy: model-latency
+        models:
+          - ollama/qwen3.6:35b-a3b-q4_K_M   # 35B MoE, ~3B active, SWE-bench ~73.4% (vendor-reported). Local tag is selected per-hardware by scripts/render-configs.mjs.
+
+  # --- Tier 2: local-heavy ---
+  heavy:
+    load-balance:
+      chat:
+        strategy: model-latency
+        models:
+          - ollama/qwen3.6:27b-mlx   # dense 27B. Local tag is selected per-hardware by scripts/render-configs.mjs (Apple-Silicon MLX build vs plain).
+
+  # --- Tier 3: frontier (budget-capped; latency-balanced across Claude/GPT/Gemini) ---
+  frontier:
+    load-balance:
+      chat:
+        strategy: model-latency
+        models:
+          - anthropic/claude-opus-4-8
+          - openai/gpt-4.1
+          - gemini/gemini-2.5-pro
+    # rate-limit (per-api-key token/$ cap) removed 2026-07-07: confirmed live it fails
+    # config load outright ("store not configured") without a globally-declared
+    # rate-limit store (redis/in-memory) elsewhere in the config — an extra backend
+    # this standalone kit doesn't otherwise need. budget below already caps spend.
+    budget:
+      max-usd-per-day: 7.0       # mirrors the sum of the LiteLLM per-deployment caps
+
+  # --- Privacy-pinned: ONE local model, NO fallback — cannot leave the box ---
+  private:
+    load-balance:
+      chat:
+        strategy: model-latency
+        models:
+          - ollama/qwen3.6:27b-mlx   # dense 27B. Local tag is selected per-hardware by scripts/render-configs.mjs (Apple-Silicon MLX build vs plain).
+
+# Caching is OPT-IN and left OFF so the standalone variant needs no Redis/S3 — simply
+# omitting cache-store does this; `type: disabled` is not a real schema variant
+# (confirmed live: only `redis`/`in-memory` are accepted) and fails config load outright.
+
+# Field names corrected 2026-07-07 (confirmed live: the real schema wants `exporter`/
+# `otlp-endpoint`, not `prometheus`/`otel-endpoint` — `exporter: both` emits Prometheus
+# metrics AND OTel spans, matching the two purposes the old field names implied).
+telemetry:
+  exporter: both
+  otlp-endpoint: http://otel-collector:4318

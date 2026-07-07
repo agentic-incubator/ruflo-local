@@ -1,0 +1,38 @@
+# =============================================================================
+# docker-compose.ci.yml — CI-only overlay, layered on top of docker-compose.yml via
+# COMPOSE_FILE=docker-compose.yml:docker-compose.ci.yml (see .github/workflows/
+# autopilot-gate.yml). Never used by real users — keeps the shipped docker-compose.yml
+# (and gateway-variants.md) free of test-only clutter.
+#
+# Adds:
+#   - fake-upstream (scripts/lib/fake-upstream-server.mjs): a controllable transparent
+#     proxy in front of Ollama. Gives smoke-test.sh's escalation/fall-through drills
+#     real, deterministic signal on Bifrost/Helicone, which lack LiteLLM's mock_response/
+#     mock_testing_fallbacks test hooks. Normal mode passes every request through
+#     byte-for-byte (zero signal loss for every other check); POST /control arms a
+#     bounded intercept. Published to host so smoke-test.sh (run on the CI runner, not
+#     in a container) can reach /control directly.
+#   - ollama: swaps the named `ollama_models` volume for a host bind mount (OLLAMA_MODELS,
+#     the same env var autopilot-gate.yml already caches via actions/cache) so pulled
+#     model blobs persist across matrix legs — the cache key is model-tag-based
+#     (config/model-sets.json's "ci" variant), shared identically across all 3 gateway
+#     profiles, so one cache entry covers the whole matrix.
+# =============================================================================
+services:
+  fake-upstream:
+    image: node:24-alpine
+    container_name: fake-upstream
+    working_dir: /app
+    ports:
+      - "9100:9100"
+    volumes:
+      - ./scripts:/app/scripts:ro
+    environment:
+      - PORT=9100
+      - UPSTREAM_URL=${FAKE_UPSTREAM_TARGET:-http://ollama:11434}
+    command: ["node", "/app/scripts/lib/fake-upstream-server.mjs"]
+    restart: unless-stopped
+
+  ollama:
+    volumes:
+      - ${OLLAMA_MODELS:-./.ci-ollama-models}:/root/.ollama
