@@ -188,11 +188,13 @@ jobs:
       - name: Bring up route-gateway + ${{ matrix.profile }} (make gateway-up)
         run: |
           OLLAMA_API_BASE=http://fake-upstream:9100 make gateway-up PROFILE=${{ matrix.profile }}
-          # /health/liveliness is LiteLLM's own endpoint; /v1/models is the OpenAI-
-          # compatible fallback for Bifrost/Helicone (EXPERIMENTAL — see gateway-variants.md,
-          # same caveat as this repo's other bifrost/helicone integration points).
+          # /health/liveliness is LiteLLM's own endpoint; /v1/models is Bifrost's real
+          # OpenAI-compatible models list (confirmed live); bare /health is Helicone's
+          # real health endpoint (confirmed against its own test suite — /health/liveliness
+          # and /v1/models both 404 there since it parses any other unrecognized path
+          # segment as a provider name, not a real health check).
           for i in $(seq 1 90); do
-            (curl -sf -o /dev/null "$GW/health/liveliness" || curl -sf -o /dev/null "$GW/v1/models") && break
+            (curl -sf -o /dev/null "$GW/health/liveliness" || curl -sf -o /dev/null "$GW/v1/models" || curl -sf -o /dev/null "$GW/health") && break
             sleep 2
             if [ "$i" = 90 ]; then
               echo "::error::route-gateway/${{ matrix.profile }} never became healthy"

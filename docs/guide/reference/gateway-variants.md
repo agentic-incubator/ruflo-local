@@ -119,6 +119,8 @@ Helicone AI Gateway ([Helicone/ai-gateway](https://github.com/Helicone/ai-gatewa
 > ```
 > The guarantee is **inviolable by design across every variant**; only its *validation path* differs.
 
+> [!WARNING]
+> **DRACO corpus recording likely does not correctly attribute Helicone traffic.** `route-gateway`'s own tier detection (`EXPLICIT_TIERS` in `scripts/gateway-server.mjs`) recognizes a request as an explicit tier by matching the literal alias string (`tier-fast`, etc.) in the `model` field. Because Helicone requires the *real* resolved model id in that field even under router addressing (see the NOTE above), route-gateway sees e.g. `model: "ollama/qwen2.5:0.5b"` instead — which doesn't match any tier alias, so the request isn't recognized as a scorable/bufferable tier decision the way LiteLLM/Bifrost traffic is. `smoke-test.sh`'s DRACO corpus-growth check has shown inconsistent results under `GATEWAY_KIND=helicone` for this reason. Not yet root-caused to a specific fix.
 > [!NOTE]
 > **Host-native Ollama + experimental.** Like Bifrost, `config/gateways/helicone-config.yaml` hardcodes the ollama `base-url` (edit it for `--scale ollama=0` host setups), caching is left **off** (no Redis/S3 needed), and the image tag (`helicone/ai-gateway:0.2.0-beta.30`) + config schema must be verified against your Helicone release ([config reference](https://docs.helicone.ai/ai-gateway/config)). Per-key rate limiting (token/request caps beyond the daily USD `budget`) was removed 2026-07-07 — it requires a globally-configured rate-limit store (redis/in-memory) this standalone kit doesn't otherwise need; the daily budget cap still applies.
 

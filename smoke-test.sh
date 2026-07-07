@@ -104,7 +104,15 @@ assess_escalation(){
 }
 
 hr "Gateway health"
-curl -sS "$GW/health/liveliness" && echo
+# /health/liveliness is LiteLLM's own endpoint; Bifrost has no dedicated one (its
+# /v1/models list is the closer equivalent, exercised implicitly below); Helicone's
+# real health endpoint is the bare /health path (confirmed against its own test
+# suite — /health/liveliness there gets parsed as an unrecognized provider name).
+if [ "$GATEWAY_KIND" = "helicone" ]; then
+  curl -sS "$GW/health" && echo
+else
+  curl -sS "$GW/health/liveliness" && echo
+fi
 
 hr "Tier 1 (local-fast) answers"
 ask tier-fast "Reply with exactly: TIER1-OK" | python3 -c 'import sys,json;d=json.load(sys.stdin);print("model:",d.get("model"),"| reply:",d["choices"][0]["message"]["content"][:60])'

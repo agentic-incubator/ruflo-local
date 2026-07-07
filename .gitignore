@@ -46,7 +46,8 @@ logs/
 prometheus-data/
 grafana-data/
 grafana-storage/
-.ci-ollama-models/   # docker-compose.ci.yml's local fallback bind-mount path (no OLLAMA_MODELS set)
+# docker-compose.ci.yml's local fallback bind-mount path (no OLLAMA_MODELS set)
+.ci-ollama-models/
 
 # ------------------------------------------------------------------------------
 # Build artifacts & archives
