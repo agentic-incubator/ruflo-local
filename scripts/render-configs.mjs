@@ -51,7 +51,11 @@ const { fast, heavy, private: priv } = tags;
 // LiteLLM needs no substitution here: its template already reads os.environ/OLLAMA_API_BASE.
 // Deliberately NOT in config/model-sets.json — that file's own _note documents it as
 // bare-tag-only; this is render-time plumbing, not a model tag.
-const ollamaBaseUrl = variant === "ci" ? "http://fake-upstream:9100/v1" : "http://ollama:11434/v1";
+// Two forms: Helicone's openai-compatible custom provider wants the /v1 suffix;
+// Bifrost's ollama_key_config.url is the bare host (Bifrost's own OpenAI-compat
+// translation lives internally — confirmed against its docs' own Ollama example).
+const ollamaBaseUrlBare = variant === "ci" ? "http://fake-upstream:9100" : "http://ollama:11434";
+const ollamaBaseUrl = `${ollamaBaseUrlBare}/v1`;
 
 // ---- 3. Per-gateway provider prefixing --------------------------------------
 // Each gateway names the local Ollama provider differently, so the same bare
@@ -69,19 +73,42 @@ const gateways = [
 ];
 
 // ---- 4. Render each gateway --------------------------------------------------
+// {{TIER_*_MODEL}} is the per-gateway-prefixed form (e.g. "ollama-local/qwen2.5:0.5b"
+// for Helicone's routers), used for REFERENCING a tier from elsewhere. {{TIER_*_MODEL_BARE}}
+// is the raw tag with no provider prefix — needed where a gateway's OWN provider block
+// declares which model IDs it exposes (e.g. Helicone's providers.ollama-local.models),
+// as opposed to referencing one.
 function render(templateText, prefix) {
   return templateText
+    .split("{{TIER_FAST_MODEL_BARE}}").join(fast)
+    .split("{{TIER_HEAVY_MODEL_BARE}}").join(heavy)
+    .split("{{TIER_PRIVATE_MODEL_BARE}}").join(priv)
     .split("{{TIER_FAST_MODEL}}").join(prefix(fast))
     .split("{{TIER_HEAVY_MODEL}}").join(prefix(heavy))
     .split("{{TIER_PRIVATE_MODEL}}").join(prefix(priv))
-    .split("{{OLLAMA_BASE_URL}}").join(ollamaBaseUrl); // no-op for litellm's template (env-driven, no such token)
+    .split("{{OLLAMA_BASE_URL_BARE}}").join(ollamaBaseUrlBare) // Bifrost only
+    .split("{{OLLAMA_BASE_URL}}").join(ollamaBaseUrl); // Helicone only (litellm's template has neither token — env-driven)
+}
+
+// Bifrost's schema is strict (additionalProperties: false almost everywhere), so the
+// "_meta"/"_note" documentation-key convention used elsewhere in this repo's generated
+// configs fails its validator. JSON has no native comments (unlike the YAML templates),
+// so bifrost-config.json.tmpl carries whole-line `//` comments instead, stripped here
+// before the rendered output ever reaches Bifrost. Whole-line only (a trimmed line
+// starting with `//`) — never strips inline, so a URL value is never touched.
+function stripJsonComments(text) {
+  return text
+    .split("\n")
+    .filter((line) => !line.trim().startsWith("//"))
+    .join("\n");
 }
 
 const resolved = {};
 for (const gw of gateways) {
   const prefix = prefixers[gw.name];
   const tmplText = readFileSync(join(repoRoot, gw.tmpl), "utf8");
-  const rendered = render(tmplText, prefix);
+  let rendered = render(tmplText, prefix);
+  if (gw.out.endsWith(".json")) rendered = stripJsonComments(rendered);
   writeFileSync(join(repoRoot, gw.out), rendered);
   resolved[gw.name] = {
     fast: prefix(fast),

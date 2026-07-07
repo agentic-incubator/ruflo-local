@@ -66,12 +66,23 @@ Bifrost (Go, [maximhq/bifrost](https://github.com/maximhq/bifrost)) is a µs-cla
 
 | Concern | LiteLLM | Bifrost |
 |---|---|---|
-| Tier aliases | 4 tiers | **same 4 tiers** (`config/gateways/bifrost-config.json`) |
-| Frontier budgets | per-deployment `max_budget` | `budget.max_usd_per_day` + `rpm`/`tpm` |
-| Fallbacks | `litellm_settings.fallbacks` | `models.tier-frontier.fallbacks` |
+| Tier aliases | 4 tiers | **same 4 tiers**, via `providers.<name>.keys[].aliases` (`config/gateways/bifrost-config.json`) |
+| Frontier fallback | `litellm_settings.fallbacks` (per-alias chain) | `governance.routing_rules[]` (provider-scoped: anthropic → openai/gemini for `tier-frontier`; no per-alias tier-fast→tier-heavy equivalent — see quirks below) |
+| Frontier budgets | per-deployment `max_budget` | not yet expressed (real schema's cost controls live elsewhere in `governance`; the current template has no budget block) |
 | Metrics | `/metrics` (Prom) | native Prometheus (job `bifrost`) |
 | OTel spans | `otel` callback → collector | native OTel → collector |
 | Port | internal `:4000` | internal `:8080` — neither has a host port; `route-gateway` (host `:4000`) reaches whichever is active by service name |
+
+<details>
+<summary><strong>Real-world quirks found &amp; fixed (2026-07-07)</strong> — click to expand</summary>
+
+The pinned image (`maximhq/bifrost:v1.5.2`) had never actually been brought up via `docker compose` in this repo before a CI matrix run first exercised it. Two independent bugs surfaced, both confirmed live (not guessed) and fixed in `docker-compose.yml` / `config/templates/bifrost-config.json.tmpl`:
+
+1. **Entrypoint infinite loop (vendor bug).** The image's own `docker-entrypoint.sh` has a `parse_args()` catch-all branch (`set -- "$@" "$1"; shift`) that never shrinks the argument count for any flag it doesn't recognize as `--port`/`--host` — `-app-dir` (which this compose file must pass) triggers it every time, hanging the container forever with zero log output. Confirmed via `sh -x` trace. **Fix:** `docker-compose.yml`'s `bifrost` service sets `entrypoint: ["/app/main"]` directly, bypassing the broken wrapper — the real binary starts in ~3.5s and serves `/health` correctly.
+2. **Stale config schema.** The old template's `providers.<name>.{type,base_url,api_key}` + top-level `models` map was never valid against v1.5.2's real schema (confirmed via its own live validator). The real shape is `keys[]`-based: each key has `name`/`value`/a `models` allow-list/`weight`, plus provider-specific `*_key_config` (e.g. `ollama_key_config: {url}`), and a client-facing alias maps to the real model id via `keys[].aliases`. Rewritten accordingly; verified live (tier-fast/heavy/private, DRACO corpus growth, and the privacy pin all pass through the real container).
+3. **Fallback is provider-scoped, not alias-scoped.** `governance.routing_rules[].fallbacks` lists *provider names* to retry, not *aliases* — there's no direct way to express "tier-fast fails over to tier-heavy" the way LiteLLM's `fallbacks` chain does. Only `tier-frontier`'s cross-provider leg (anthropic → openai/gemini) is currently expressed; `smoke-test.sh`'s fall-through drill prints the result for Bifrost rather than hard-asserting on it, for exactly this reason.
+
+</details>
 
 > [!WARNING]
 > **Privacy pin under Bifrost — verify it, don't assume it.** `tier-private` in `config/gateways/bifrost-config.json` has an **empty `fallbacks` list** (the same intent as LiteLLM keeping it out of every chain). But this rests on Bifrost honoring that (unverified) schema key, and `smoke-test.sh`'s privacy check only catches a leak if Bifrost returns the **resolved** model name (not just the `tier-private` alias). So after switching: confirm the resolved model in `config/gateways/bifrost-config.json` is local-only **and** re-run the smoke check. The guarantee is **inviolable by design** across variants — but under an experimental gateway you must validate the config actually enforces it.
@@ -97,31 +108,52 @@ make gateway-up PROFILE=bifrost && ./scripts/bench-gateway.sh   # variant
 Helicone AI Gateway ([Helicone/ai-gateway](https://github.com/Helicone/ai-gateway), Rust, Apache-2.0) is a low-overhead, OpenAI-compatible gateway with **native OpenTelemetry + Prometheus** and — unlike Bifrost — **dollar/token/request budgets and optional response caching** built in. Config lives in [`config/gateways/helicone-config.yaml`](../../../config/gateways/helicone-config.yaml), which mirrors the four tiers as **named routers**.
 
 > [!IMPORTANT]
-> **Addressing differs.** Helicone routes by **router name**, so clients call `http://localhost:4000/router/tier-fast` rather than `POST /v1/chat/completions` with `model: "tier-fast"`. The tier *vocabulary* is preserved (the routers are named `tier-fast` / `tier-heavy` / `tier-frontier` / `tier-private`), but point your clients at the `/router/<tier>` path when this variant is active. Consequently the shipped **`smoke-test.sh` targets LiteLLM/Bifrost addressing and does not exercise Helicone** — use the `/router/<tier>` paths to test this variant.
+> **Addressing differs, AND router names drop the `tier-` prefix.** Helicone routes by **router name**, so clients call `http://localhost:4000/router/fast` rather than `POST /v1/chat/completions` with `model: "tier-fast"`. The routers are named `fast` / `heavy` / `frontier` / `private` — no `tier-` prefix, unlike LiteLLM/Bifrost's `tier-fast` etc. This isn't a style choice: Helicone's router IDs are regex-capped at 12 characters (confirmed against its source, `ai-gateway/src/config/mod.rs`'s `ROUTER_ID_REGEX`), and `tier-frontier` (13 chars) cannot exist as a router ID at all. Rather than special-case just that one tier, all four drop the prefix uniformly. `smoke-test.sh` handles this automatically via `GATEWAY_KIND=helicone` (strips `tier-` before building the `/router/<name>` path) — set that env var to get full, real coverage under this variant, not a skip.
 
 > [!WARNING]
-> **Privacy pin under Helicone — validated by config, NOT by the shipped smoke test.** The `tier-private` router load-balances over a **single local model, with no other models and no fallback** (and the config has no global fallback block), so it cannot escalate off-box — by construction. **Caveat:** `smoke-test.sh` uses LiteLLM/Bifrost `model=`-at-`/v1/chat/completions` addressing, so it does **not** exercise Helicone's `/router/<tier>` routes — re-running it under Helicone validates nothing. Validate the pin here by (a) inspecting `config/gateways/helicone-config.yaml` (`tier-private` = one local model) and (b) a direct call, asserting the resolved model is local:
+> **Privacy pin under Helicone.** The `private` router load-balances over a **single local model, with no other models and no fallback** (and the config has no global fallback block), so it cannot escalate off-box — by construction. `smoke-test.sh`'s privacy-pin check exercises this for real when run with `GATEWAY_KIND=helicone` (it builds the correct `/router/private` path automatically). To validate manually instead:
 > ```bash
-> curl -sS http://localhost:4000/router/tier-private/chat/completions \
+> curl -sS http://localhost:4000/router/private/chat/completions \
 >   -H "Content-Type: application/json" \
 >   -d '{"messages":[{"role":"user","content":"ping"}]}' | jq -r '.model'   # must be a LOCAL model
 > ```
 > The guarantee is **inviolable by design across every variant**; only its *validation path* differs.
 
 > [!NOTE]
-> **Host-native Ollama + experimental.** Like Bifrost, `config/gateways/helicone-config.yaml` hardcodes the ollama `base-url` (edit it for `--scale ollama=0` host setups), caching is left **off** (no Redis/S3 needed), and the image tag (`helicone/ai-gateway:v1.0.0`) + config schema must be verified against your Helicone release ([config reference](https://docs.helicone.ai/ai-gateway/config)).
+> **Host-native Ollama + experimental.** Like Bifrost, `config/gateways/helicone-config.yaml` hardcodes the ollama `base-url` (edit it for `--scale ollama=0` host setups), caching is left **off** (no Redis/S3 needed), and the image tag (`helicone/ai-gateway:0.2.0-beta.30`) + config schema must be verified against your Helicone release ([config reference](https://docs.helicone.ai/ai-gateway/config)). Per-key rate limiting (token/request caps beyond the daily USD `budget`) was removed 2026-07-07 — it requires a globally-configured rate-limit store (redis/in-memory) this standalone kit doesn't otherwise need; the daily budget cap still applies.
+
+> [!WARNING]
+> **Known gap (2026-07-07): local-tier (fast/heavy/private) chat completions do not yet work through Helicone.** After fixing the image tag, entrypoint command, and five real schema errors (provider `models` list, `strategy: weighted`→`model-latency`, `telemetry` field names, `cache-store`, router ID length), the local Ollama path now fails with `Converter not present for OpenAI(ChatCompletions) -> OpenAICompatible { provider: Named("ollama-local"), ... }` — the `openai-compatible` custom provider type doesn't have a registered chat-completions converter for router-based addressing in v0.2.0-beta.30. `tier-frontier`'s real-provider (anthropic/openai/gemini) routing is unaffected by this. Root-causing this is a larger investigation than the schema fixes above; `smoke-test.sh` will surface it clearly (not silently) when run with `GATEWAY_KIND=helicone`.
+
+<details>
+<summary><strong>Real-world quirks found &amp; fixed (2026-07-07)</strong> — click to expand</summary>
+
+Like Bifrost, Helicone had never actually been brought up via `docker compose` in this repo before a CI matrix run first exercised it — the pinned tag couldn't even be *pulled*. Confirmed live against the real image at each step, in order:
+
+1. **`v1.0.0` was never a real Docker Hub tag.** Pull failed with `manifest unknown`. Helicone/ai-gateway has never published a Docker tag with a `v` prefix — GitHub releases use `v0.2.0-beta.N`, Docker Hub strips the `v`. Corrected to `helicone/ai-gateway:0.2.0-beta.30` (the latest real tag as of this writing).
+2. **No image ENTRYPOINT.** `docker-compose.yml`'s `command: ["--config", "/app/config.yaml"]` was executing literal `--config` as if it were the binary (`exec: "--config": executable file not found`). The image's bare `CMD` is `/usr/local/bin/ai-gateway` with no entrypoint — fixed by prefixing the full binary path in `command:`.
+3. **`cache-store: {type: disabled}` isn't a real variant** — only `redis`/`in-memory` are accepted. Fixed by omitting the block entirely (caching is opt-in; omitting it *is* "off").
+4. **A custom provider must declare its own `models:` list.** `providers.ollama-local` needs the real (unprefixed) model tags it exposes, separate from how routers *reference* them (`ollama-local/<tag>`).
+5. **`strategy: weighted` ≠ "pin one model."** It's `ProviderWeighted` — it picks among *providers* via a `providers: [{provider, weight}]` field, not a `models:` list. Each tier needing one specific model uses `model-latency` (`models: [modelId]`) instead — confirmed against `ai-gateway/src/config/balance.rs`'s `BalanceConfigInner` enum.
+6. **`telemetry` field names differ from what the old template guessed** — the real fields are `exporter`/`otlp-endpoint`, not `prometheus`/`otel-endpoint` (`exporter: both` emits Prometheus metrics *and* OTel spans).
+7. **Router IDs are capped at 12 characters** (`ai-gateway/src/config/mod.rs`'s `ROUTER_ID_REGEX`, `^[A-Za-z0-9_-]{1,12}$`) — `tier-frontier` (13 chars) cannot exist as a router ID at all. Rather than a one-off exception, all four routers drop the `tier-` prefix uniformly (see the IMPORTANT callout above).
+8. **Per-key rate limiting needs a store.** `rate-limit.per-api-key` failed with `store not configured` — it requires a globally-declared rate-limit backend (redis/in-memory) this standalone kit doesn't otherwise need. Removed; the daily USD `budget` cap still applies.
+9. **Remaining, unresolved:** the local-tier chat-completions converter gap described in the WARNING above.
+
+</details>
 
 ### Which gateway? — three-way comparison
 
 | | **LiteLLM** (default) | **Bifrost** | **Helicone** |
 |---|---|---|---|
 | Language / footprint | Python + Postgres | Go, µs-class | Rust, µs-class |
-| Client addressing | `model: "tier-fast"` | `model: "tier-fast"` | `/router/tier-fast` |
-| Frontier budgets | ✅ USD per deployment | ◐ `budget` block | ✅ USD + token + request |
+| Client addressing | `model: "tier-fast"` | `model: "tier-fast"` | `/router/fast` (no `tier-` prefix — 12-char router ID cap) |
+| Frontier budgets | ✅ USD per deployment | ✗ not yet expressed in this template | ✅ USD per day |
 | Response caching | via config | — | ✅ Redis/S3 (opt-in, off here) |
 | Native OTel / Prometheus | callback / `/metrics` | ✅ native | ✅ native |
 | Config | `config/gateways/litellm-config.yaml` | `config/gateways/bifrost-config.json` | `config/gateways/helicone-config.yaml` |
 | Maturity in this kit | **stable default** | experimental | experimental |
-| Privacy pin (`tier-private`) | no fallback chain | empty `fallbacks` | single-model router, no fallback |
+| Privacy pin (`tier-private`) | no fallback chain | one key, no routing rule targets it | single-model router, no fallback |
+| Local-tier (fast/heavy/private) chat | ✅ works | ✅ works (live-verified) | ✗ known gap — see quirks above |
 
-Pick **LiteLLM** for the richest, most-proven surface; **Bifrost** for the leanest overhead; **Helicone** when you want lean overhead *and* first-class budgets/caching.
+Pick **LiteLLM** for the richest, most-proven surface; **Bifrost** for the leanest overhead, local tiers verified working; **Helicone** for its budgets/caching feature set once the local-tier gap above is resolved — for now, `tier-frontier` is its only proven-working path.

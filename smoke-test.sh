@@ -61,7 +61,11 @@ control_fake_upstream(){ # $1=JSON body, e.g. '{"mode":"bad-answer","times":1}'
 
 ask(){ # $1=alias $2=prompt
   if [ "$GATEWAY_ADDRESSING" = "path" ]; then
-    curl -sS "$GW/router/$1/chat/completions" \
+    # Helicone's router IDs are regex-capped at 12 chars (ROUTER_ID_REGEX in its own
+    # source) — "tier-frontier" (13) can't exist as a router name at all, so Helicone's
+    # routers drop the "tier-" prefix uniformly (fast/heavy/frontier/private) rather
+    # than special-casing just the one tier that overflows. See helicone-config.yaml.tmpl.
+    curl -sS "$GW/router/${1#tier-}/chat/completions" \
       -H "Authorization: Bearer $KEY" -H "Content-Type: application/json" \
       -d "{\"max_tokens\":60,\"messages\":[{\"role\":\"user\",\"content\":\"$2\"}]}"
   else

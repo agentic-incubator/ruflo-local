@@ -150,6 +150,13 @@ services:
   # bifrost-config.json). Bifrost listens on :8080 internally — no host port at all;
   # route-gateway (host :4000) reaches it by service name.
   # EXPERIMENTAL: verify the image tag + config schema against your Bifrost release.
+  # entrypoint/command bypass the image's OWN docker-entrypoint.sh: its parse_args()
+  # infinite-loops on any flag it doesn't literally recognize as --port/--host (confirmed
+  # via `sh -x` trace — the catch-all branch `set -- "$@" "$1"; shift` never shrinks $#),
+  # which -app-dir triggers every time, hanging the container forever with zero log
+  # output. Calling /app/main directly (verified working: starts in ~3.5s, /health
+  # returns {"status":"ok"}) sidesteps the vendor bug entirely — logic unaffected, only
+  # the broken shell wrapper is skipped.
   bifrost:
     image: maximhq/bifrost:v1.5.2
     container_name: bifrost
@@ -163,7 +170,8 @@ services:
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
       - GEMINI_API_KEY=${GEMINI_API_KEY:-}
       - OLLAMA_API_BASE=${OLLAMA_API_BASE:-http://ollama:11434}
-    command: ["-app-dir", "/app/data"]
+    entrypoint: ["/app/main"]
+    command: ["-app-dir", "/app/data", "-port", "8080", "-host", "0.0.0.0", "-log-level", "info", "-log-style", "pretty"]
     restart: unless-stopped
 
   # --- Alternative gateway: Helicone AI Gateway (Rust, native OTel + budgets/cache) ---
@@ -173,8 +181,17 @@ services:
   # routes to one local model with no fallback (privacy pin). Listens :8080 internally —
   # no host port at all; route-gateway (host :4000) reaches it by service name.
   # EXPERIMENTAL: verify the image tag + config schema against your Helicone release.
+  # Tag corrected 2026-07-07: the previously-pinned v1.0.0 was never a real Docker Hub
+  # tag (confirmed: "manifest unknown" on pull) — Helicone/ai-gateway has never
+  # published semver Docker tags with a "v" prefix; 0.2.0-beta.30 (no "v") is the
+  # latest real tag as of this writing (GitHub releases use "v0.2.0-beta.N", Docker
+  # Hub strips the "v" — verify both still align before bumping further). Command also
+  # corrected: this image sets NO entrypoint (bare CMD ["/usr/local/bin/ai-gateway"]),
+  # so `command: ["--config", ...]` alone was executing "--config" as if it were the
+  # binary — confirmed via `docker inspect`. Full binary path restores the real CLI
+  # (`ai-gateway --help`: -c/--config <path>).
   helicone:
-    image: helicone/ai-gateway:v1.0.0
+    image: helicone/ai-gateway:0.2.0-beta.30
     container_name: helicone
     profiles: ["helicone"]
     depends_on:
@@ -186,7 +203,7 @@ services:
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
       - GEMINI_API_KEY=${GEMINI_API_KEY:-}
       - OLLAMA_API_BASE=${OLLAMA_API_BASE:-http://ollama:11434}
-    command: ["--config", "/app/config.yaml"]
+    command: ["/usr/local/bin/ai-gateway", "--config", "/app/config.yaml"]
     restart: unless-stopped
 
   # --- Optional: learned 90/10 router (RouteLLM, lm-sys) --------------------

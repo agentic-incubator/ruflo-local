@@ -1,38 +1,82 @@
 {
-  "_meta": {
-    "purpose": "Bifrost gateway config mirroring this kit's four tier aliases, for the `bifrost` compose profile (COMPOSE_PROFILES=bifrost). Bifrost is the Go, µs-class, native-OTel alternative to the default LiteLLM gateway — see docs/guide/reference/gateway-variants.md.",
-    "note": "EXPERIMENTAL TEMPLATE — Bifrost's config schema evolves; verify these keys against the pinned image (maximhq/bifrost:v1.5.2) before relying on it. What MUST hold regardless of schema: the four aliases exist, tier-private has an EMPTY fallback list (the privacy pin — it can never leave the box), and tier-frontier carries the daily budget. GENERATED FILE — do not edit bifrost-config.json by hand; edit config/templates/bifrost-config.json.tmpl + config/model-sets.json and run `make render` (the local model tags are filled per-hardware at render time).",
-    "schema_version": 1
-  },
+  "$schema": "https://www.getbifrost.ai/schema",
 
   "providers": {
-    "_ollama_note": "base_url is the IN-CONTAINER ollama URL; unlike LiteLLM this is not read from OLLAMA_API_BASE. Host-native Ollama (macOS/Windows, --scale ollama=0): change this to http://host.docker.internal:11434/v1 — see gateway-variants.md. The local model tags below are selected per-hardware by scripts/render-configs.mjs (Apple-Silicon MLX builds vs plain). http://ollama:11434/v1 is real Ollama for mlx/gguf; the CI variant points it at fake-upstream (docker-compose.ci.yml) instead.",
-    "ollama":    { "type": "openai_compatible", "base_url": "http://ollama:11434/v1" },
-    "anthropic": { "type": "anthropic", "api_key": "env.ANTHROPIC_API_KEY" },
-    "openai":    { "type": "openai",    "api_key": "env.OPENAI_API_KEY" },
-    "gemini":    { "type": "gemini",    "api_key": "env.GEMINI_API_KEY" }
-  },
-
-  "models": {
-    "tier-fast":  { "provider": "ollama", "model": "qwen3.6:35b-a3b-q4_K_M", "locality": "local" },
-    "tier-heavy": { "provider": "ollama", "model": "qwen3.6:27b-mlx", "locality": "local" },
-    "tier-frontier": {
-      "provider": "anthropic",
-      "model": "claude-opus-4-8",
-      "locality": "cloud",
-      "fallbacks": ["openai/gpt-4.1", "gemini/gemini-2.5-pro"],
-      "budget": { "max_usd_per_day": 7.0, "rpm": 6, "tpm": 60000 }
+    "ollama": {
+      "keys": [
+        {
+          "name": "tier-fast",
+          "value": "",
+          "models": ["tier-fast"],
+          "weight": 1.0,
+          "aliases": { "tier-fast": "qwen3.6:35b-a3b-q4_K_M" },
+          "ollama_key_config": { "url": "http://ollama:11434" }
+        },
+        {
+          "name": "tier-heavy",
+          "value": "",
+          "models": ["tier-heavy"],
+          "weight": 1.0,
+          "aliases": { "tier-heavy": "qwen3.6:27b-mlx" },
+          "ollama_key_config": { "url": "http://ollama:11434" }
+        },
+        {
+          "name": "tier-private",
+          "value": "",
+          "models": ["tier-private"],
+          "weight": 1.0,
+          "aliases": { "tier-private": "qwen3.6:27b-mlx" },
+          "ollama_key_config": { "url": "http://ollama:11434" }
+        }
+      ]
     },
-    "tier-private": {
-      "provider": "ollama",
-      "model": "qwen3.6:27b-mlx",
-      "locality": "local",
-      "fallbacks": []
+    "anthropic": {
+      "keys": [
+        {
+          "name": "tier-frontier-anthropic",
+          "value": "env.ANTHROPIC_API_KEY",
+          "models": ["tier-frontier"],
+          "weight": 1.0,
+          "aliases": { "tier-frontier": "claude-opus-4-8" }
+        }
+      ]
+    },
+    "openai": {
+      "keys": [
+        {
+          "name": "tier-frontier-openai",
+          "value": "env.OPENAI_API_KEY",
+          "models": ["tier-frontier"],
+          "weight": 1.0,
+          "aliases": { "tier-frontier": "gpt-4.1" }
+        }
+      ]
+    },
+    "gemini": {
+      "keys": [
+        {
+          "name": "tier-frontier-gemini",
+          "value": "env.GEMINI_API_KEY",
+          "models": ["tier-frontier"],
+          "weight": 1.0,
+          "aliases": { "tier-frontier": "gemini-2.5-pro" }
+        }
+      ]
     }
   },
 
-  "telemetry": {
-    "prometheus": true,
-    "otel_endpoint": "http://otel-collector:4318"
+  "governance": {
+    "routing_rules": [
+      {
+        "id": "tier-frontier-provider-fallback",
+        "name": "tier-frontier: anthropic primary, openai/gemini fallback",
+        "enabled": true,
+        "cel_expression": "model == 'tier-frontier'",
+        "targets": [{ "provider": "anthropic", "weight": 1.0 }],
+        "fallbacks": ["openai", "gemini"],
+        "scope": "global",
+        "priority": 0
+      }
+    ]
   }
 }
