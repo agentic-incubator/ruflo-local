@@ -42,8 +42,9 @@ The shipped `.env` sets `COMPOSE_PROFILES=litellm`, so **`docker compose up -d` 
 
 ```bash
 # Default — LiteLLM (from the shipped .env):
+make gateway-up
+# equivalent, if you're not using make (relies on the shipped .env defaults):
 docker compose up -d
-# equivalently: make gateway-up            (PROFILE defaults to litellm)
 
 # Switch to Bifrost (litellm stops; bifrost starts internal-only on :8080):
 make gateway-up PROFILE=bifrost
@@ -149,6 +150,8 @@ Like Bifrost, Helicone had never actually been brought up via `docker compose` i
 </details>
 
 ### Which gateway? — three-way comparison
+
+> **Diagrammatic version:** [gateway-comparison.html](gateway-comparison.html) — the same three-way comparison as a visual gates matrix plus per-gateway fallback-trace diagrams (what literally happens when `tier-fast`'s backend returns a real 500), cross-checked against upstream Bifrost/Helicone source and issues.
 
 | | **LiteLLM** (default) | **Bifrost** | **Helicone** |
 |---|---|---|---|

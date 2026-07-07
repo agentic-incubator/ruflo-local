@@ -9,10 +9,10 @@ Send **~90% of your LLM traffic to open-weight models on your own hardware** and
 ## Quick start
 
 ```bash
-cp .env.example .env        # add keys; default gateway is LiteLLM — to switch, use `make gateway-up PROFILE=<name>` (see Gateway Variants)
+cp .env.example .env        # add keys
 make render                 # render gateway configs to YOUR hardware (Apple Silicon→MLX, else→GGUF)
                             #   non-Apple-Silicon: make render RUFLO_MODEL_VARIANT=gguf
-docker compose up -d        # default gateway (LiteLLM) + Ollama + Prometheus + Grafana
+make gateway-up             # LiteLLM (default) + Ollama + Prometheus + Grafana — switch with PROFILE=bifrost|helicone (see Gateway Variants)
 ./smoke-test.sh             # verify tiers, fall-through, privacy pin, metrics (auto-sources .env)
 ```
 

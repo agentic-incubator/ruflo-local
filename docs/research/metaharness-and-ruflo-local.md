@@ -129,8 +129,10 @@ router only returns fixed provider names, you map those names to aliases (path B
 Bring the gateway up (from this repo's README):
 
 ```bash
-cp .env.example .env        # add keys; pick your gateway via COMPOSE_PROFILES
+cp .env.example .env        # add keys; default gateway is LiteLLM
+make render                 # render gateway configs to your hardware
 docker compose up -d        # LiteLLM :4000 + Ollama + Prometheus + Grafana
+#   to switch gateways instead: make gateway-up PROFILE=bifrost|helicone
 ./smoke-test.sh             # verify tiers, fall-through, privacy pin, metrics
 ```
 

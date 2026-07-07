@@ -1,0 +1,376 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Three Gateways, One Contract</title>
+<style>
+  :root{
+    --paper:#eef2f1; --ink:#12201f; --ink-dim:#4b5f5c;
+    --accent:#1f8a7e; --accent-soft:#d7ece8;
+    --warn:#8a6111; --warn-bg:#f5e6c8; --warn-line:#d3ab55;
+    --fail:#9c3428; --fail-bg:#f6dcd7; --fail-line:#cf7264;
+    --ok-bg:#dcefe9; --ok-line:#68b6a4;
+    --line:rgba(18,32,31,0.14); --line-strong:rgba(18,32,31,0.28);
+    --surface:#ffffff; --surface-2:#e3e9e7;
+    --mono: ui-monospace, "SF Mono", "Cascadia Code", "JetBrains Mono", Consolas, monospace;
+    --sans: ui-sans-serif, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --paper:#0c1413; --ink:#e6efed; --ink-dim:#9fb3af;
+      --accent:#4fd1c0; --accent-soft:#123330;
+      --warn:#e0a83f; --warn-bg:#2c2410; --warn-line:#7a5a1c;
+      --fail:#e2685c; --fail-bg:#301612; --fail-line:#7a352b;
+      --ok-bg:#0f2b25; --ok-line:#2f6f5e;
+      --line:rgba(230,239,237,0.14); --line-strong:rgba(230,239,237,0.28);
+      --surface:#101a19; --surface-2:#16211f;
+    }
+  }
+  :root[data-theme="dark"]{
+    --paper:#0c1413; --ink:#e6efed; --ink-dim:#9fb3af;
+    --accent:#4fd1c0; --accent-soft:#123330;
+    --warn:#e0a83f; --warn-bg:#2c2410; --warn-line:#7a5a1c;
+    --fail:#e2685c; --fail-bg:#301612; --fail-line:#7a352b;
+    --ok-bg:#0f2b25; --ok-line:#2f6f5e;
+    --line:rgba(230,239,237,0.14); --line-strong:rgba(230,239,237,0.28);
+    --surface:#101a19; --surface-2:#16211f;
+  }
+  :root[data-theme="light"]{
+    --paper:#eef2f1; --ink:#12201f; --ink-dim:#4b5f5c;
+    --accent:#1f8a7e; --accent-soft:#d7ece8;
+    --warn:#8a6111; --warn-bg:#f5e6c8; --warn-line:#d3ab55;
+    --fail:#9c3428; --fail-bg:#f6dcd7; --fail-line:#cf7264;
+    --ok-bg:#dcefe9; --ok-line:#68b6a4;
+    --line:rgba(18,32,31,0.14); --line-strong:rgba(18,32,31,0.28);
+    --surface:#ffffff; --surface-2:#e3e9e7;
+  }
+
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;}
+  body{
+    background:var(--paper); color:var(--ink); font-family:var(--sans);
+    line-height:1.55; -webkit-font-smoothing:antialiased;
+  }
+  .page{max-width:1040px;margin:0 auto;padding:2.75rem 1.5rem 5rem;}
+
+  .eyebrow{
+    font-family:var(--mono); font-size:0.72rem; letter-spacing:0.12em; text-transform:uppercase;
+    color:var(--accent); font-weight:700; margin:0 0 0.85rem;
+  }
+  h1{
+    font-family:var(--mono); font-weight:700; letter-spacing:-0.01em;
+    font-size:clamp(1.7rem,3.4vw,2.5rem); line-height:1.12; margin:0 0 0.9rem;
+    text-wrap:balance;
+  }
+  .thesis{
+    font-size:1.06rem; max-width:62ch; color:var(--ink); margin:0 0 0.6rem;
+  }
+  .thesis b{background:linear-gradient(transparent 62%, var(--accent-soft) 62%); }
+  .meta{
+    font-family:var(--mono); font-size:0.74rem; color:var(--ink-dim); margin:1.1rem 0 0;
+    display:flex; flex-wrap:wrap; gap:0.4rem 1.1rem;
+  }
+  .meta span::before{content:"— ";}
+  .backlink{font-family:var(--mono); font-size:0.76rem; margin-bottom:1.6rem; display:inline-block;}
+  .backlink a{color:var(--accent); text-decoration:none; border-bottom:1px solid var(--accent-soft);}
+  .backlink a:hover{border-bottom-color:var(--accent);}
+
+  section{margin-top:3rem;}
+  h2{
+    font-family:var(--mono); font-size:0.82rem; letter-spacing:0.1em; text-transform:uppercase;
+    color:var(--ink-dim); font-weight:700; margin:0 0 0.35rem; padding-bottom:0.6rem;
+    border-bottom:1px solid var(--line-strong);
+  }
+  h2 small{display:block; font-family:var(--sans); text-transform:none; letter-spacing:0; font-weight:400; color:var(--ink-dim); font-size:0.92rem; margin-top:0.5rem;}
+
+  /* ---------- architecture strip ---------- */
+  .arch{
+    margin-top:1.4rem; overflow-x:auto; padding-bottom:0.3rem;
+  }
+  .arch-row{display:flex; align-items:stretch; gap:0; min-width:760px;}
+  .node{
+    background:var(--surface); border:1px solid var(--line-strong); border-radius:3px;
+    padding:0.85rem 1rem; font-family:var(--mono); font-size:0.78rem;
+  }
+  .node.seam{
+    flex:0 0 190px; display:flex; flex-direction:column; justify-content:center; gap:0.3rem;
+    background:var(--accent-soft); border-color:var(--accent);
+  }
+  .node.seam .t{font-weight:700; font-size:0.86rem;}
+  .arrow-col{
+    flex:0 0 64px; display:flex; align-items:center; justify-content:center;
+    position:relative; font-family:var(--mono); font-size:0.66rem; color:var(--ink-dim);
+  }
+  .arrow-col::before{
+    content:""; position:absolute; left:0; right:0; top:50%; height:1px; background:var(--line-strong);
+  }
+  .arrow-col span{position:relative; background:var(--paper); padding:0 0.3rem; white-space:nowrap; z-index:1;}
+  .fanout{flex:1; display:flex; flex-direction:column; gap:0.6rem;}
+  .node.gw{display:flex; flex-direction:column; gap:0.3rem;}
+  .node.gw .t{font-weight:700; font-size:0.84rem; display:flex; align-items:center; gap:0.5rem;}
+  .node.gw .addr{color:var(--ink-dim); font-size:0.72rem;}
+  .dot{width:0.5rem;height:0.5rem;border-radius:50%;flex:none;}
+  .dot.active{background:var(--accent);}
+  .dot.idle{background:var(--ink-dim); opacity:0.4;}
+
+  /* ---------- matrix ---------- */
+  .matrix-wrap{overflow-x:auto; margin-top:1.4rem; border:1px solid var(--line-strong); border-radius:4px;}
+  table.matrix{border-collapse:collapse; width:100%; min-width:820px; font-size:0.86rem;}
+  table.matrix caption{caption-side:bottom; text-align:left; font-size:0.74rem; color:var(--ink-dim); padding:0.6rem 0.9rem; font-family:var(--mono);}
+  table.matrix th, table.matrix td{padding:0.62rem 0.85rem; border-bottom:1px solid var(--line); vertical-align:top; text-align:left;}
+  table.matrix thead th{
+    font-family:var(--mono); font-size:0.7rem; letter-spacing:0.06em; text-transform:uppercase;
+    color:var(--ink-dim); background:var(--surface-2); position:sticky; top:0;
+    border-bottom:1px solid var(--line-strong);
+  }
+  table.matrix tbody tr:last-child td{border-bottom:none;}
+  table.matrix td.gatecol{font-weight:600; width:24%;}
+  table.matrix td.gatecol .sub{display:block; font-weight:400; color:var(--ink-dim); font-size:0.78rem; margin-top:0.15rem;}
+  td.cell{width:25.3%;}
+  .chip{
+    display:inline-flex; align-items:center; gap:0.4rem; font-family:var(--mono); font-size:0.7rem;
+    font-weight:700; letter-spacing:0.02em; padding:0.16rem 0.5rem; border-radius:99px; border:1px solid;
+    margin-bottom:0.32rem;
+  }
+  .chip.ok{background:var(--ok-bg); border-color:var(--ok-line); color:var(--accent);}
+  .chip.warn{background:var(--warn-bg); border-color:var(--warn-line); color:var(--warn);}
+  .chip.fail{background:var(--fail-bg); border-color:var(--fail-line); color:var(--fail);}
+  .cellnote{color:var(--ink-dim); font-size:0.79rem; display:block;}
+  .tally{font-family:var(--mono); font-size:0.72rem; color:var(--ink-dim); margin-top:0.9rem;}
+  .tally b{color:var(--ink);}
+
+  /* ---------- fallback traces ---------- */
+  .trace{
+    margin-top:1.3rem; border:1px solid var(--line-strong); border-radius:4px; overflow:hidden;
+  }
+  .trace + .trace{margin-top:1rem;}
+  .trace-head{
+    display:flex; align-items:center; justify-content:space-between; gap:1rem; flex-wrap:wrap;
+    padding:0.75rem 1rem; background:var(--surface-2); border-bottom:1px solid var(--line-strong);
+  }
+  .trace-head .name{font-family:var(--mono); font-weight:700; font-size:0.92rem;}
+  .trace-body{padding:1rem; overflow-x:auto;}
+  .steps{display:flex; align-items:stretch; gap:0.5rem; min-width:640px;}
+  .step{
+    background:var(--surface); border:1px solid var(--line); border-radius:3px; padding:0.55rem 0.7rem;
+    font-family:var(--mono); font-size:0.72rem; flex:1; min-width:118px; display:flex; flex-direction:column; gap:0.15rem;
+  }
+  .step .k{color:var(--ink-dim); font-size:0.64rem; text-transform:uppercase; letter-spacing:0.04em;}
+  .step.hot{border-color:var(--fail-line); background:var(--fail-bg); color:var(--fail);}
+  .step.good{border-color:var(--ok-line); background:var(--ok-bg); color:var(--accent);}
+  .conn{display:flex; align-items:center; justify-content:center; flex:0 0 26px; color:var(--ink-dim); font-size:0.85rem;}
+  .verdict{
+    margin-top:0.85rem; padding:0.7rem 0.85rem; border-radius:3px; font-size:0.86rem; border:1px solid;
+  }
+  .verdict.good{background:var(--ok-bg); border-color:var(--ok-line);}
+  .verdict.bad{background:var(--fail-bg); border-color:var(--fail-line); color:var(--fail);}
+  .verdict b{font-family:var(--mono);}
+  .fix{margin-top:0.6rem; font-size:0.84rem; color:var(--ink-dim);}
+  .fix code, p code, li code, td code{
+    font-family:var(--mono); background:var(--surface-2); padding:0.08rem 0.32rem; border-radius:3px; font-size:0.87em;
+  }
+
+  /* ---------- footer / sources ---------- */
+  .sources{margin-top:1rem; font-size:0.82rem; color:var(--ink-dim);}
+  .sources ol{padding-left:1.2rem; margin:0.6rem 0 0;}
+  .sources li{margin-bottom:0.35rem;}
+  .sources a{color:var(--accent); text-decoration:none; border-bottom:1px solid var(--accent-soft);}
+  .sources a:hover{border-bottom-color:var(--accent);}
+  footer{margin-top:3.5rem; padding-top:1.2rem; border-top:1px solid var(--line); font-family:var(--mono); font-size:0.7rem; color:var(--ink-dim);}
+
+  @media (prefers-reduced-motion: reduce){ *{transition:none !important;} }
+</style>
+</head>
+<body>
+<div class="page">
+
+  <span class="backlink">← <a href="gateway-variants.md">Gateway Variants</a></span>
+
+  <p class="eyebrow">ruflo-local · gateway parity reference</p>
+  <h1>Three gateways, one contract</h1>
+  <p class="thesis">LiteLLM, Bifrost, and Helicone all claim to serve the same four tiers — <code>tier-fast</code>, <code>tier-heavy</code>, <code>tier-frontier</code>, <code>tier-private</code> — behind one client-facing contract. <b>None of the three honor every clause of it today.</b> Where they diverge is specific and load-bearing: not vibes, but exact config fields, source paths, and one shared blind spot (fallback that looks configured but never fires on a real error).</p>
+  <div class="meta">
+    <span>Grounded in <code>config/gateways/*</code>, <code>smoke-test.sh</code>, <code>docs/guide/reference/gateway-variants.md</code></span>
+    <span>Fallback mechanics cross-checked against upstream source + issues, 2026-07-07</span>
+  </div>
+
+  <section>
+    <h2>The seam <small>One host port, one active backend, two addressing dialects</small></h2>
+    <div class="arch">
+      <div class="arch-row">
+        <div class="node seam">
+          <span class="t">route-gateway</span>
+          <span>host :4000 · always-on</span>
+          <span>judge / escalate / DRACO record</span>
+        </div>
+        <div class="arrow-col"><span>forwards →</span></div>
+        <div class="fanout">
+          <div class="node gw">
+            <span class="t"><span class="dot active"></span>LiteLLM <span class="cellnote">(default, active)</span></span>
+            <span class="addr">POST /v1/chat/completions&nbsp; body: <code>model: "tier-fast"</code></span>
+          </div>
+          <div class="node gw">
+            <span class="t"><span class="dot idle"></span>Bifrost</span>
+            <span class="addr">POST /v1/chat/completions&nbsp; body: <code>model: "tier-fast"</code> — same dialect as LiteLLM</span>
+          </div>
+          <div class="node gw">
+            <span class="t"><span class="dot idle"></span>Helicone</span>
+            <span class="addr">POST /router/<b>fast</b>/chat/completions — path-based, <code>tier-</code> prefix dropped (12-char router-ID cap), body still needs the real resolved model id</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>The gates <small>Every row is a real behavior <code>smoke-test.sh</code> or a config file checks for. Chip = honored today, against the checked-in config + live/source-verified behavior.</small></h2>
+    <div class="matrix-wrap">
+      <table class="matrix">
+        <thead>
+          <tr><th>Gate</th><th>LiteLLM</th><th>Bifrost</th><th>Helicone</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="gatecol">Health check<span class="sub">reachable liveness endpoint</span></td>
+            <td class="cell"><span class="chip ok">honored</span><span class="cellnote"><code>/health/liveliness</code></span></td>
+            <td class="cell"><span class="chip ok">honored</span><span class="cellnote">no dedicated route — <code>/v1/models</code> proxied instead</span></td>
+            <td class="cell"><span class="chip ok">honored</span><span class="cellnote">bare <code>/health</code> — any other path is parsed as a provider name (broke CI until <code>a59cfa6</code>)</span></td>
+          </tr>
+          <tr>
+            <td class="gatecol">Uniform addressing<span class="sub">client says <code>model: "tier-fast"</code></span></td>
+            <td class="cell"><span class="chip ok">honored</span><span class="cellnote">reference dialect</span></td>
+            <td class="cell"><span class="chip ok">honored</span><span class="cellnote">same dialect as LiteLLM</span></td>
+            <td class="cell"><span class="chip fail">not honored</span><span class="cellnote">path-based <code>/router/&lt;name&gt;</code>, prefix dropped, real model id required in body — route-gateway shims this, Helicone doesn't natively speak it</span></td>
+          </tr>
+          <tr>
+            <td class="gatecol">All 4 tiers answer<span class="sub">fast / heavy / frontier / private each serve</span></td>
+            <td class="cell"><span class="chip ok">honored</span></td>
+            <td class="cell"><span class="chip ok">honored</span><span class="cellnote">live-verified 2026-07-07</span></td>
+            <td class="cell"><span class="chip ok">honored</span><span class="cellnote">live-verified 2026-07-07, after the provider-key + model-id fixes</span></td>
+          </tr>
+          <tr>
+            <td class="gatecol">Escalation drill<span class="sub">judged-bad local reply → real frontier answer</span></td>
+            <td class="cell"><span class="chip ok">honored</span><span class="cellnote">native <code>mock_response</code> hook, plus fake-upstream</span></td>
+            <td class="cell"><span class="chip ok">honored</span><span class="cellnote">via fake-upstream only — no native mock hook</span></td>
+            <td class="cell"><span class="chip ok">honored</span><span class="cellnote">via fake-upstream; needed <code>tierFromRouterPath()</code> fix to be recognized at all</span></td>
+          </tr>
+          <tr>
+            <td class="gatecol">Cross-tier fall-through<span class="sub">tier-fast hard-fails → served by tier-heavy</span></td>
+            <td class="cell"><span class="chip ok">honored</span><span class="cellnote"><code>litellm_settings.fallbacks</code> + <code>num_retries: 2</code> — verified live</span></td>
+            <td class="cell"><span class="chip fail">not configured</span><span class="cellnote">no alias-level chain exists — <code>governance.routing_rules</code> is provider-scoped only</span></td>
+            <td class="cell"><span class="chip fail">not configured</span><span class="cellnote">each router is hard-scoped to one tier; no cross-router fallback in this schema</span></td>
+          </tr>
+          <tr>
+            <td class="gatecol">Same-tier redundancy<span class="sub">tier-frontier: Claude → GPT → Gemini on real error</span></td>
+            <td class="cell"><span class="chip ok">honored</span><span class="cellnote"><code>fallbacks</code> chain, proven in production</span></td>
+            <td class="cell"><span class="chip warn">configured, doesn't fire</span><span class="cellnote"><code>governance.routing_rules[].fallbacks</code> is a real, separate, higher-precedence path from Bifrost's actual retry engine — 8 forced 500s never triggered it</span></td>
+            <td class="cell"><span class="chip warn">configured, doesn't fire</span><span class="cellnote"><code>load-balance: model-latency</code> is a proactive picker — confirmed non-reactive to forced 500s</span></td>
+          </tr>
+          <tr>
+            <td class="gatecol">Privacy pin<span class="sub"><code>tier-private</code> can never leave the box</span></td>
+            <td class="cell"><span class="chip ok">honored</span><span class="cellnote">absent from every fallback chain</span></td>
+            <td class="cell"><span class="chip ok">honored</span><span class="cellnote">empty <code>fallbacks</code> list on the key</span></td>
+            <td class="cell"><span class="chip ok">honored</span><span class="cellnote">single-model router, no fallback block</span></td>
+          </tr>
+          <tr>
+            <td class="gatecol">DRACO corpus recording<span class="sub">real call → +1 row, real embedding</span></td>
+            <td class="cell"><span class="chip ok">honored</span></td>
+            <td class="cell"><span class="chip ok">honored</span></td>
+            <td class="cell"><span class="chip ok">honored</span><span class="cellnote">needed the same path-tier fix as escalation</span></td>
+          </tr>
+          <tr>
+            <td class="gatecol">Native metrics / OTel<span class="sub">Prometheus scrape + spans</span></td>
+            <td class="cell"><span class="chip ok">honored</span><span class="cellnote">via <code>prometheus</code>/<code>otel</code> callbacks</span></td>
+            <td class="cell"><span class="chip ok">honored</span><span class="cellnote">native</span></td>
+            <td class="cell"><span class="chip ok">honored</span><span class="cellnote">native, <code>exporter: both</code></span></td>
+          </tr>
+          <tr>
+            <td class="gatecol">Budget caps<span class="sub">USD ceiling stops an over-budget deployment</span></td>
+            <td class="cell"><span class="chip ok">honored</span><span class="cellnote">per-deployment <code>max_budget</code> + rpm/tpm</span></td>
+            <td class="cell"><span class="chip fail">not expressed</span><span class="cellnote">no budget block in the current schema/template</span></td>
+            <td class="cell"><span class="chip ok">honored</span><span class="cellnote"><code>budget.max-usd-per-day</code> — frontier router only</span></td>
+          </tr>
+        </tbody>
+        <caption>10 gates checked · chip color = honored / configured-but-inert / not honored — not a quality ranking of the gateway itself.</caption>
+      </table>
+    </div>
+    <p class="tally">Score as checked-in today — <b>LiteLLM 10/10</b> honored · <b>Bifrost 7 honored, 1 inert, 2 unconfigured</b> · <b>Helicone 7 honored, 1 inert, 2 unconfigured</b>. Bifrost and Helicone fail on <i>different</i> pairs of gates, but share the exact same inert one.</p>
+  </section>
+
+  <section>
+    <h2>The shared blind spot <small>What actually happens when tier-fast's real backend returns a genuine 500 — traced mechanism by mechanism</small></h2>
+
+    <div class="trace">
+      <div class="trace-head"><span class="name">LiteLLM</span><span class="chip ok">verified working</span></div>
+      <div class="trace-body">
+        <div class="steps">
+          <div class="step hot"><span class="k">tier-fast</span>ollama 500</div>
+          <div class="conn">→</div>
+          <div class="step"><span class="k">retry ×2</span><code>num_retries: 2</code></div>
+          <div class="conn">→</div>
+          <div class="step hot"><span class="k">still 500</span>budget exhausted</div>
+          <div class="conn">→</div>
+          <div class="step"><span class="k">engage</span><code>litellm_settings.fallbacks</code></div>
+          <div class="conn">→</div>
+          <div class="step good"><span class="k">served by</span>tier-heavy</div>
+        </div>
+        <div class="verdict good"><b>Client sees a clean answer.</b> Transparent failover, proven live in this repo (commit <code>52b5bcb</code>).</div>
+      </div>
+    </div>
+
+    <div class="trace">
+      <div class="trace-head"><span class="name">Bifrost</span><span class="chip fail">not working today</span></div>
+      <div class="trace-body">
+        <div class="steps">
+          <div class="step hot"><span class="k">tier-fast</span>ollama 500</div>
+          <div class="conn">→</div>
+          <div class="step hot"><span class="k">no alias chain</span><code>governance.routing_rules</code> only covers <code>tier-frontier</code></div>
+          <div class="conn">→</div>
+          <div class="step hot"><span class="k">client sees</span>raw 500</div>
+        </div>
+        <div class="verdict bad"><b>Even where a rule exists</b> (tier-frontier: anthropic → openai/gemini), <code>governance.routing_rules[].fallbacks</code> is a distinct, higher-precedence path from Bifrost's real retry/fallback engine — 8 forced 500s in testing never triggered it.</div>
+        <div class="fix">Untested fix path: Bifrost's own <code>retries-and-fallbacks</code> feature — a provider-config-level <code>Fallback&#123;Provider, Model&#125;</code> construct, separate from <code>governance</code> — retries the same provider then fails to the next on <i>any</i> failure type. <code>docs.getbifrost.ai/features/retries-and-fallbacks</code>. No alias-level (tier-fast→tier-heavy) chain exists in either mechanism yet — only cross-provider redundancy within one tier.</div>
+      </div>
+    </div>
+
+    <div class="trace">
+      <div class="trace-head"><span class="name">Helicone</span><span class="chip fail">not working today</span></div>
+      <div class="trace-body">
+        <div class="steps">
+          <div class="step hot"><span class="k">/router/fast</span>ollama 500</div>
+          <div class="conn">→</div>
+          <div class="step hot"><span class="k">model-latency</span>proactive picker, one model in the list, not error-triggered</div>
+          <div class="conn">→</div>
+          <div class="step hot"><span class="k">client sees</span>raw 500</div>
+        </div>
+        <div class="verdict bad"><b>The health-monitor circuit breaker</b> (<code>discover.monitor.health</code>) does mark a provider unhealthy after a real failure — but under path-pinned <code>/router/&lt;name&gt;</code> addressing, an unhealthy pinned provider just fails outright rather than silently substituting a pool member.</div>
+        <div class="fix">Untested fix path: Helicone's <b>Unified API</b> (<code>https://ai-gateway.helicone.ai</code>) takes a comma-separated, provider-qualified fallback chain directly in the <code>model</code> field (e.g. <code>tier-fast/ollama,tier-heavy/ollama</code>) — architecturally distinct from <code>/router/&lt;name&gt;</code>. Unconfirmed whether it works against self-hosted Ollama with tier-alias names, not just Helicone-hosted/BYOK keys.</div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Bottom line</h2>
+    <p class="thesis" style="max-width:70ch">LiteLLM's fallback ladder is the only one actually wired end-to-end — treat it as the reference behavior, not a baseline every gateway already matches. Bifrost and Helicone each have a real, separate, <i>still file-based</i> fallback mechanism that was never exercised in this repo's config: Bifrost's <code>retries-and-fallbacks</code> feature, and Helicone's Unified API. Neither requires standing up Postgres/SQLite/Cloud mode — the fix in both cases is switching mechanisms, not adding infrastructure. Nothing in the verified evidence says otherwise; claims that a database is required were explicitly checked and rejected.</p>
+  </section>
+
+  <section class="sources">
+    <h2>Sources</h2>
+    <ol>
+      <li><code>docs/guide/reference/gateway-variants.md</code> — three-way comparison table, quirks log (2026-07-07)</li>
+      <li><code>config/gateways/litellm-config.yaml</code>, <code>bifrost-config.json</code>, <code>helicone-config.yaml</code> — checked-in schemas</li>
+      <li><code>smoke-test.sh</code> — gate definitions (health, tiers, escalation, fall-through, privacy pin, DRACO, metrics)</li>
+      <li>git <code>52b5bcb</code>·<code>6a8288b</code>·<code>4ad5ded</code>·<code>a59cfa6</code>·<code>f8554a2</code> — matrix CI + parity fix history</li>
+      <li><a href="https://docs.getbifrost.ai/features/retries-and-fallbacks">docs.getbifrost.ai/features/retries-and-fallbacks</a> — Bifrost's real retry/fallback engine</li>
+      <li>pkg.go.dev/github.com/maximhq/bifrost/core/schemas — typed <code>Fallback</code> construct</li>
+      <li>GitHub <code>maximhq/bifrost</code> issues #1912, #2408 — governance/configStore rough edges in no-database OSS deployments</li>
+      <li><a href="https://docs.helicone.ai/gateway/provider-routing">docs.helicone.ai/gateway/provider-routing</a>, <a href="https://docs.helicone.ai/gateway/overview">/gateway/overview</a> — Unified API + Always Online mechanism</li>
+      <li><code>ai-gateway/src/config/monitor.rs</code>, <code>ai-gateway/src/config/mod.rs</code> — Helicone health-monitor + router-ID cap source</li>
+    </ol>
+  </section>
+
+  <footer>ruflo-local · generated from repo state + deep-research synthesis, 2026-07-07</footer>
+</div>
+</body>
+</html>
