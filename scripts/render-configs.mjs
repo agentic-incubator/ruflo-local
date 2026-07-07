@@ -46,6 +46,13 @@ if (!tags) {
 }
 const { fast, heavy, private: priv } = tags;
 
+// The "ci" variant points Bifrost/Helicone's hardcoded ollama base_url at fake-upstream
+// (scripts/lib/fake-upstream-server.mjs) instead of real Ollama — see docker-compose.ci.yml.
+// LiteLLM needs no substitution here: its template already reads os.environ/OLLAMA_API_BASE.
+// Deliberately NOT in config/model-sets.json — that file's own _note documents it as
+// bare-tag-only; this is render-time plumbing, not a model tag.
+const ollamaBaseUrl = variant === "ci" ? "http://fake-upstream:9100/v1" : "http://ollama:11434/v1";
+
 // ---- 3. Per-gateway provider prefixing --------------------------------------
 // Each gateway names the local Ollama provider differently, so the same bare
 // tag is prefixed per-gateway before it lands in the rendered config.
@@ -66,7 +73,8 @@ function render(templateText, prefix) {
   return templateText
     .split("{{TIER_FAST_MODEL}}").join(prefix(fast))
     .split("{{TIER_HEAVY_MODEL}}").join(prefix(heavy))
-    .split("{{TIER_PRIVATE_MODEL}}").join(prefix(priv));
+    .split("{{TIER_PRIVATE_MODEL}}").join(prefix(priv))
+    .split("{{OLLAMA_BASE_URL}}").join(ollamaBaseUrl); // no-op for litellm's template (env-driven, no such token)
 }
 
 const resolved = {};

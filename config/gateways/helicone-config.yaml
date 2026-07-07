@@ -22,6 +22,8 @@ providers:
   # Custom OpenAI-compatible local endpoint (Ollama). Verify the base_url key name
   # against the config reference. Unlike LiteLLM this is not read from OLLAMA_API_BASE
   # — host-native Ollama users edit it to http://host.docker.internal:11434/v1.
+  # http://ollama:11434/v1 is real Ollama for mlx/gguf; the CI variant points it at
+  # fake-upstream (docker-compose.ci.yml) instead — see scripts/render-configs.mjs.
   ollama-local:
     type: openai-compatible
     base-url: http://ollama:11434/v1

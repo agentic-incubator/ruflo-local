@@ -131,26 +131,31 @@ jobs:
           fi
 
   # ── 2. LOCAL SMOKE — Ollama + tiny cached model, LOCAL tiers only, no secrets ─
+  # Matrixed across all three gateway profiles, through the real docker-compose stack
+  # (route-gateway included) — not a raw `docker run litellm`, so router.mjs/reflex.mjs/
+  # recorder.mjs's live wiring is actually exercised in CI, on every profile.
+  # fail-fast:false: an unrelated failure on one profile must not cancel the other two —
+  # we want independent signal from litellm/bifrost/helicone every run.
   local-smoke:
-    name: local-smoke
+    name: local-smoke (${{ matrix.profile }})
     runs-on: ubuntu-latest
     # Advisory: not a required check. Skip on draft PRs to save runner minutes.
     if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false }}
+    strategy:
+      fail-fast: false
+      matrix:
+        profile: [litellm, bifrost, helicone]
     env:
       OLLAMA_MODELS: ${{ github.workspace }}/.ollama-models
       GW: http://localhost:4000
       LITELLM_MASTER_KEY: sk-local-master
-    services:
-      postgres:
-        image: postgres:16-alpine
-        env:
-          POSTGRES_USER: litellm
-          POSTGRES_PASSWORD: litellm
-          POSTGRES_DB: litellm
-        ports: ["5432:5432"]
-        options: >-
-          --health-cmd "pg_isready -U litellm"
-          --health-interval 5s --health-timeout 5s --health-retries 10
+      # docker-compose.ci.yml adds fake-upstream (gives the escalation/fall-through
+      # drills real signal on bifrost/helicone too) and bind-mounts OLLAMA_MODELS into
+      # the ollama service so actions/cache below actually persists pulled blobs.
+      COMPOSE_FILE: docker-compose.yml:docker-compose.ci.yml
+      # smoke-test.sh: which gateway is active — drives addressing (Helicone routes by
+      # path) and which escalation/fall-through mechanism applies.
+      GATEWAY_KIND: ${{ matrix.profile }}
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v6
@@ -167,63 +172,60 @@ jobs:
           path: ${{ env.OLLAMA_MODELS }}
           key: ollama-${{ steps.model.outputs.tag }}-${{ hashFiles('config/model-sets.json') }}
 
-      - name: Install & start Ollama, pull the stand-in model
-        run: |
-          curl -fsSL https://ollama.com/install.sh | sh
-          mkdir -p "$OLLAMA_MODELS"
-          OLLAMA_MODELS="$OLLAMA_MODELS" ollama serve &
-          # Wait for the Ollama API before pulling.
-          for i in $(seq 1 30); do curl -sf http://localhost:11434/api/version && break || sleep 1; done
-          ollama pull "${{ steps.model.outputs.tag }}"
-
       - name: Render the CI gateway config (tiny stand-in for every tier)
         run: RUFLO_MODEL_VARIANT=ci node scripts/render-configs.mjs
 
-      - name: Start LiteLLM against local Ollama
+      - name: Bring up Ollama + fake-upstream, pull the stand-in model
         run: |
-          docker run -d --name litellm --network host \
-            -e OLLAMA_API_BASE=http://localhost:11434 \
-            -e LITELLM_MASTER_KEY="$LITELLM_MASTER_KEY" \
-            -e DATABASE_URL=postgresql://litellm:litellm@localhost:5432/litellm \
-            -e OPENAI_API_KEY=sk-ci-unused \
-            -e ANTHROPIC_API_KEY=sk-ci-unused \
-            -e GEMINI_API_KEY=sk-ci-unused \
-            -v "$PWD/config/gateways/litellm-config.yaml:/app/config.yaml" \
-            ghcr.io/berriai/litellm:v1.83.14-stable --config /app/config.yaml --port 4000
-          # Wait for the gateway to report healthy.
+          mkdir -p "$OLLAMA_MODELS"
+          docker compose up -d ollama fake-upstream
           for i in $(seq 1 60); do
-            curl -sf "$GW/health/liveliness" && break || sleep 2
-            if [ "$i" = 60 ]; then echo "::error::LiteLLM never became healthy"; docker logs litellm; exit 1; fi
+            curl -sf http://localhost:11434/api/version && break || sleep 2
+            if [ "$i" = 60 ]; then echo "::error::Ollama never became healthy"; docker compose logs ollama; exit 1; fi
+          done
+          docker compose exec -T ollama ollama pull "${{ steps.model.outputs.tag }}"
+
+      - name: Bring up route-gateway + ${{ matrix.profile }} (make gateway-up)
+        run: |
+          OLLAMA_API_BASE=http://fake-upstream:9100 make gateway-up PROFILE=${{ matrix.profile }}
+          # /health/liveliness is LiteLLM's own endpoint; /v1/models is the OpenAI-
+          # compatible fallback for Bifrost/Helicone (EXPERIMENTAL — see gateway-variants.md,
+          # same caveat as this repo's other bifrost/helicone integration points).
+          for i in $(seq 1 90); do
+            (curl -sf -o /dev/null "$GW/health/liveliness" || curl -sf -o /dev/null "$GW/v1/models") && break
+            sleep 2
+            if [ "$i" = 90 ]; then
+              echo "::error::route-gateway/${{ matrix.profile }} never became healthy"
+              docker compose logs route-gateway "${{ matrix.profile }}"
+              exit 1
+            fi
           done
 
       - name: Local smoke (no escalation)
         run: SMOKE_LOCAL_ONLY=1 bash ./smoke-test.sh
 
-      - name: LiteLLM logs on failure
+      - name: Gateway logs on failure
         if: failure()
-        run: docker logs litellm || true
+        run: docker compose logs route-gateway "${{ matrix.profile }}" fake-upstream ollama || true
 
   # ── 3. ESCALATION — full smoke incl. frontier; only when a key is configured ─
+  # Same matrix + compose-stack approach as local-smoke, plus real provider keys so the
+  # escalation drill has a real judge/frontier to escalate to.
   escalation:
-    name: escalation
+    name: escalation (${{ matrix.profile }})
     needs: preflight
     if: ${{ needs.preflight.outputs.has_frontier_key == 'true' }}
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        profile: [litellm, bifrost, helicone]
     env:
       OLLAMA_MODELS: ${{ github.workspace }}/.ollama-models
       GW: http://localhost:4000
       LITELLM_MASTER_KEY: sk-local-master
-    services:
-      postgres:
-        image: postgres:16-alpine
-        env:
-          POSTGRES_USER: litellm
-          POSTGRES_PASSWORD: litellm
-          POSTGRES_DB: litellm
-        ports: ["5432:5432"]
-        options: >-
-          --health-cmd "pg_isready -U litellm"
-          --health-interval 5s --health-timeout 5s --health-retries 10
+      COMPOSE_FILE: docker-compose.yml:docker-compose.ci.yml
+      GATEWAY_KIND: ${{ matrix.profile }}
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v6
@@ -240,40 +242,39 @@ jobs:
           path: ${{ env.OLLAMA_MODELS }}
           key: ollama-${{ steps.model.outputs.tag }}-${{ hashFiles('config/model-sets.json') }}
 
-      - name: Install & start Ollama, pull the stand-in model
-        run: |
-          curl -fsSL https://ollama.com/install.sh | sh
-          mkdir -p "$OLLAMA_MODELS"
-          OLLAMA_MODELS="$OLLAMA_MODELS" ollama serve &
-          for i in $(seq 1 30); do curl -sf http://localhost:11434/api/version && break || sleep 1; done
-          ollama pull "${{ steps.model.outputs.tag }}"
-
       - name: Render the CI gateway config
         run: RUFLO_MODEL_VARIANT=ci node scripts/render-configs.mjs
 
-      - name: Start LiteLLM with real provider keys
+      - name: Bring up Ollama + fake-upstream, pull the stand-in model
+        run: |
+          mkdir -p "$OLLAMA_MODELS"
+          docker compose up -d ollama fake-upstream
+          for i in $(seq 1 60); do
+            curl -sf http://localhost:11434/api/version && break || sleep 2
+            if [ "$i" = 60 ]; then echo "::error::Ollama never became healthy"; docker compose logs ollama; exit 1; fi
+          done
+          docker compose exec -T ollama ollama pull "${{ steps.model.outputs.tag }}"
+
+      - name: Bring up route-gateway + ${{ matrix.profile }} with real provider keys
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         run: |
-          docker run -d --name litellm --network host \
-            -e OLLAMA_API_BASE=http://localhost:11434 \
-            -e LITELLM_MASTER_KEY="$LITELLM_MASTER_KEY" \
-            -e DATABASE_URL=postgresql://litellm:litellm@localhost:5432/litellm \
-            -e OPENAI_API_KEY="${OPENAI_API_KEY:-sk-ci-unused}" \
-            -e ANTHROPIC_API_KEY="${ANTHROPIC_API_KEY:-sk-ci-unused}" \
-            -e GEMINI_API_KEY="${GEMINI_API_KEY:-sk-ci-unused}" \
-            -v "$PWD/config/gateways/litellm-config.yaml:/app/config.yaml" \
-            ghcr.io/berriai/litellm:v1.83.14-stable --config /app/config.yaml --port 4000
-          for i in $(seq 1 60); do
-            curl -sf "$GW/health/liveliness" && break || sleep 2
-            if [ "$i" = 60 ]; then echo "::error::LiteLLM never became healthy"; docker logs litellm; exit 1; fi
+          OLLAMA_API_BASE=http://fake-upstream:9100 make gateway-up PROFILE=${{ matrix.profile }}
+          for i in $(seq 1 90); do
+            (curl -sf -o /dev/null "$GW/health/liveliness" || curl -sf -o /dev/null "$GW/v1/models") && break
+            sleep 2
+            if [ "$i" = 90 ]; then
+              echo "::error::route-gateway/${{ matrix.profile }} never became healthy"
+              docker compose logs route-gateway "${{ matrix.profile }}"
+              exit 1
+            fi
           done
 
       - name: Full smoke (incl. frontier escalation)
         run: bash ./smoke-test.sh
 
-      - name: LiteLLM logs on failure
+      - name: Gateway logs on failure
         if: failure()
-        run: docker logs litellm || true
+        run: docker compose logs route-gateway "${{ matrix.profile }}" fake-upstream ollama || true

@@ -6,7 +6,7 @@
   },
 
   "providers": {
-    "_ollama_note": "base_url is the IN-CONTAINER ollama URL; unlike LiteLLM this is not read from OLLAMA_API_BASE. Host-native Ollama (macOS/Windows, --scale ollama=0): change this to http://host.docker.internal:11434/v1 — see gateway-variants.md. The local model tags below are selected per-hardware by scripts/render-configs.mjs (Apple-Silicon MLX builds vs plain).",
+    "_ollama_note": "base_url is the IN-CONTAINER ollama URL; unlike LiteLLM this is not read from OLLAMA_API_BASE. Host-native Ollama (macOS/Windows, --scale ollama=0): change this to http://host.docker.internal:11434/v1 — see gateway-variants.md. The local model tags below are selected per-hardware by scripts/render-configs.mjs (Apple-Silicon MLX builds vs plain). http://ollama:11434/v1 is real Ollama for mlx/gguf; the CI variant points it at fake-upstream (docker-compose.ci.yml) instead.",
     "ollama":    { "type": "openai_compatible", "base_url": "http://ollama:11434/v1" },
     "anthropic": { "type": "anthropic", "api_key": "env.ANTHROPIC_API_KEY" },
     "openai":    { "type": "openai",    "api_key": "env.OPENAI_API_KEY" },

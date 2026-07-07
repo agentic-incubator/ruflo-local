@@ -9,6 +9,34 @@ set -uo pipefail
 if [ -f "${ENV_FILE:-.env}" ]; then set -a; . "${ENV_FILE:-.env}"; set +a; fi
 GW="${GW:-http://localhost:4000}"
 KEY="${LITELLM_MASTER_KEY:-sk-local-master}"
+# Which gateway profile is behind route-gateway — drives addressing (Helicone routes by
+# path, not `model=`) and which escalation/fall-through mechanism is available (only
+# LiteLLM has native mock_response/mock_testing_fallbacks test hooks). Set by the CI
+# matrix (GATEWAY_KIND=${{ matrix.profile }}); defaults to litellm so existing local
+# users see zero behavior change.
+GATEWAY_KIND="${GATEWAY_KIND:-litellm}"
+if [ -z "${GATEWAY_ADDRESSING:-}" ]; then
+  GATEWAY_ADDRESSING="model"
+  [ "$GATEWAY_KIND" = "helicone" ] && GATEWAY_ADDRESSING="path"
+fi
+# fake-upstream (scripts/lib/fake-upstream-server.mjs, docker-compose.ci.yml) — a
+# controllable transparent proxy in front of Ollama. When reachable, it gives the
+# escalation/fall-through drills below real, deterministic signal on ANY gateway
+# (litellm/bifrost/helicone alike), not just LiteLLM's native mock hooks.
+FAKE_UPSTREAM="${FAKE_UPSTREAM:-http://localhost:9100}"
+# How many consecutive forced failures the fall-through drill needs to arm before
+# tier-fast's OWN deployment gives up and the gateway actually engages its fallback
+# chain. LiteLLM retries the SAME deployment litellm-config.yaml's num_retries (2)
+# times before falling over — 1 initial attempt + 2 retries = 3 — so arming for just 1
+# gets silently absorbed by litellm's own retry and never reaches the real fallback
+# chain at all (confirmed live: a single forced failure still returned a normal
+# tier-fast-labeled success). Bifrost/Helicone's templates show no equivalent retry
+# count (EXPERIMENTAL/unverified against their pinned images, same caveat as the rest
+# of this repo's bifrost/helicone integration) — default to 1, i.e. assume immediate
+# failover; arming for litellm's higher count on them risks also intercepting the
+# fallback TARGET's first attempt, breaking the drill the other way.
+FALLBACK_FORCE_TIMES=1
+[ "$GATEWAY_KIND" = "litellm" ] && FALLBACK_FORCE_TIMES=3
 hr(){ printf '\n\033[1m== %s ==\033[0m\n' "$*"; }
 
 # The escalation-drill and DRACO-corpus-growth checks below exercise reflex.mjs's
@@ -23,10 +51,36 @@ have_route_gateway(){
   [ -n "$(docker ps --filter 'name=^route-gateway$' --filter status=running -q 2>/dev/null)" ]
 }
 
+have_fake_upstream(){
+  curl -sS -f -o /dev/null --max-time 2 "$FAKE_UPSTREAM/health" 2>/dev/null
+}
+
+control_fake_upstream(){ # $1=JSON body, e.g. '{"mode":"bad-answer","times":1}'
+  curl -sS -X POST "$FAKE_UPSTREAM/control" -H "Content-Type: application/json" -d "$1" >/dev/null
+}
+
 ask(){ # $1=alias $2=prompt
-  curl -sS "$GW/v1/chat/completions" \
-    -H "Authorization: Bearer $KEY" -H "Content-Type: application/json" \
-    -d "{\"model\":\"$1\",\"max_tokens\":60,\"messages\":[{\"role\":\"user\",\"content\":\"$2\"}]}"
+  if [ "$GATEWAY_ADDRESSING" = "path" ]; then
+    curl -sS "$GW/router/$1/chat/completions" \
+      -H "Authorization: Bearer $KEY" -H "Content-Type: application/json" \
+      -d "{\"max_tokens\":60,\"messages\":[{\"role\":\"user\",\"content\":\"$2\"}]}"
+  else
+    curl -sS "$GW/v1/chat/completions" \
+      -H "Authorization: Bearer $KEY" -H "Content-Type: application/json" \
+      -d "{\"model\":\"$1\",\"max_tokens\":60,\"messages\":[{\"role\":\"user\",\"content\":\"$2\"}]}"
+  fi
+}
+
+# Shared verdict for both the fake-upstream and litellm-native escalation mechanisms
+# below — $1 is the reply text actually returned by the drill's forced-bad-answer call.
+assess_escalation(){
+  if [ -n "$1" ] && [ "$1" != "$BAD_ANSWER" ]; then
+    echo "escalated away from the forced-bad local answer -> real frontier reply: $1"
+  elif [ -z "${OPENAI_API_KEY:-}" ] && [ -z "${ANTHROPIC_API_KEY:-}" ] && [ -z "${GEMINI_API_KEY:-}" ]; then
+    echo "SKIPPED (no frontier provider key configured — tier-frontier has nothing to judge/escalate to)"
+  else
+    echo "WARNING: a frontier key IS configured but escalation did NOT happen — this is a real regression, not a benign skip"
+  fi
 }
 
 hr "Gateway health"
@@ -50,39 +104,52 @@ else
 fi
 
 hr "Escalation drill: a forced known-bad local answer must escalate to tier-frontier"
+# This exact string is what a forced-bad local answer looks like, whichever mechanism
+# below produces it — the REAL judge (a real frontier-model call) reliably scores it
+# low. If reflex.mjs escalates, the client-visible content is replaced by a real
+# frontier answer that is NOT this string; if it's unchanged, either no frontier key is
+# configured or the escalation didn't happen.
+BAD_ANSWER="I cannot help with that request. Please try again later."
 if [ -n "${SMOKE_LOCAL_ONLY:-}" ]; then
   echo "SKIPPED (SMOKE_LOCAL_ONLY set: no escalation)"
 elif ! have_route_gateway; then
   echo "SKIPPED (no route-gateway container running — reflex.mjs's judge/escalate only runs there, never in bare litellm)"
-else
-  # litellm's own mock_response testing feature (same idiom as mock_testing_fallbacks
-  # below) returns this exact string as the "local" answer WITHOUT calling the real
-  # model — a deterministic, obviously-unhelpful non-answer to a factual question,
-  # so the REAL judge (a real frontier-model call) reliably scores it low. If reflex.mjs
-  # escalates, the client-visible content is replaced by a real frontier answer that is
-  # NOT this string; if it's unchanged, either no frontier key is configured or the
-  # escalation didn't happen.
-  BAD_ANSWER="I cannot help with that request. Please try again later."
-  escalated_reply=$(curl -sS "$GW/v1/chat/completions" \
+elif have_fake_upstream; then
+  # Uniform path — identical for litellm/bifrost/helicone. fake-upstream sits in front
+  # of Ollama (docker-compose.ci.yml, CI "ci" model variant only) and is armed to
+  # deterministically return BAD_ANSWER for exactly the next tier-fast call — no
+  # gateway-specific mock hook needed.
+  control_fake_upstream '{"mode":"bad-answer","times":1}'
+  reply=$(ask tier-fast "What is the capital of France? Reply with just the city name." \
+    | python3 -c 'import sys,json;d=json.load(sys.stdin);print(d["choices"][0]["message"]["content"])' 2>/dev/null)
+  assess_escalation "$reply"
+elif [ "$GATEWAY_KIND" = "litellm" ]; then
+  # LiteLLM's own mock_response test hook — zero extra infra, works today without the
+  # CI overlay (docker-compose.ci.yml).
+  reply=$(curl -sS "$GW/v1/chat/completions" \
     -H "Authorization: Bearer $KEY" -H "Content-Type: application/json" \
     -d "{\"model\":\"tier-fast\",\"mock_response\":\"$BAD_ANSWER\",\"max_tokens\":40,
          \"messages\":[{\"role\":\"user\",\"content\":\"What is the capital of France? Reply with just the city name.\"}]}" \
     | python3 -c 'import sys,json;d=json.load(sys.stdin);print(d["choices"][0]["message"]["content"])' 2>/dev/null)
-  if [ -n "$escalated_reply" ] && [ "$escalated_reply" != "$BAD_ANSWER" ]; then
-    echo "escalated away from the forced-bad local answer -> real frontier reply: $escalated_reply"
-  elif [ -z "${OPENAI_API_KEY:-}" ] && [ -z "${ANTHROPIC_API_KEY:-}" ] && [ -z "${GEMINI_API_KEY:-}" ]; then
-    echo "SKIPPED (no frontier provider key configured — tier-frontier has nothing to judge/escalate to)"
-  else
-    echo "WARNING: a frontier key IS configured but escalation did NOT happen — this is a real regression, not a benign skip"
-  fi
+  assess_escalation "$reply"
+else
+  echo "SKIPPED (no fake-upstream reachable and $GATEWAY_KIND has no native mock-response hook — bring up docker-compose.ci.yml for full coverage)"
 fi
 
 hr "Fall-through drill: force tier-fast to fail → should serve via fallback chain"
-curl -sS "$GW/v1/chat/completions" \
-  -H "Authorization: Bearer $KEY" -H "Content-Type: application/json" \
-  -d '{"model":"tier-fast","mock_testing_fallbacks":true,"max_tokens":40,
-       "messages":[{"role":"user","content":"Reply with exactly: FALLBACK-OK"}]}' \
-  | python3 -c 'import sys,json;d=json.load(sys.stdin);print("served by:",d.get("model"))'
+if have_fake_upstream; then
+  # Uniform path — identical for litellm/bifrost/helicone (see the escalation drill above).
+  control_fake_upstream "{\"mode\":\"fail\",\"times\":$FALLBACK_FORCE_TIMES}"
+  ask tier-fast "Reply with exactly: FALLBACK-OK" | python3 -c 'import sys,json;d=json.load(sys.stdin);print("served by:",d.get("model"))'
+elif [ "$GATEWAY_KIND" = "litellm" ]; then
+  curl -sS "$GW/v1/chat/completions" \
+    -H "Authorization: Bearer $KEY" -H "Content-Type: application/json" \
+    -d '{"model":"tier-fast","mock_testing_fallbacks":true,"max_tokens":40,
+         "messages":[{"role":"user","content":"Reply with exactly: FALLBACK-OK"}]}' \
+    | python3 -c 'import sys,json;d=json.load(sys.stdin);print("served by:",d.get("model"))'
+else
+  echo "SKIPPED (no fake-upstream reachable and $GATEWAY_KIND has no native fallback-forcing hook — bring up docker-compose.ci.yml for full coverage)"
+fi
 
 hr "DRACO corpus growth: a real call must add exactly one new row, with a real (non-stub) embedding"
 if ! have_route_gateway; then
