@@ -49,6 +49,24 @@ const EXPLICIT_TIERS = new Set([...TIER_LADDER, "tier-private"]);
 const MAX_BODY_BYTES = 10 * 1024 * 1024; // 10MB — generous for a chat-completions JSON payload
 const ASCII_TIER_NAME = /^[a-z0-9-]+$/; // plain-ASCII shape a real tier name (or router-eligible alias) must have
 
+// Helicone addresses tiers via URL path (/router/<name>/...), never the `model` field —
+// it validates `model` against its own global catalog, so the body must carry the REAL
+// resolved model id there instead of an alias (confirmed live against a real Helicone
+// container). Without this, route-gateway would never recognize Helicone-routed local
+// traffic as an explicit tier at all: bookkeeping (servedTier) would fall through to
+// "unrouted", judging/escalation would never apply to it, and DRACO corpus rows would
+// carry the wrong tier (or none). Router names drop the "tier-" prefix (12-char router
+// ID cap on Helicone's side — see docs/guide/reference/gateway-variants.md), so this
+// maps them back to the canonical tier-fast/tier-heavy/tier-frontier/tier-private form.
+const HELICONE_ROUTER_PATH = /^\/router\/(fast|heavy|frontier|private)(?:\/|$)/;
+
+/** The canonical tier for a Helicone /router/<name>/... path, or undefined if the
+ *  path doesn't match that shape (e.g. every other gateway's addressing). */
+function tierFromRouterPath(reqPath) {
+  const match = HELICONE_ROUTER_PATH.exec(reqPath ?? "");
+  return match ? `tier-${match[1]}` : undefined;
+}
+
 /** Reads + parses the shipped reference policy once; undefined (safe default) on any failure. */
 function loadPolicy(env) {
   const { policyFile } = routerPolicyConfig(env);
@@ -238,7 +256,7 @@ function lastMessageContent(parsed) {
  * floor/budgetRung are only set when router.mjs actually ran — undefined for an
  * explicit-tier/bypass request or an unrouted (no agentType) forward.
  */
-async function prepareRequest(bodyBuffer, { routeFn, policy, env, upstream }) {
+async function prepareRequest(bodyBuffer, { routeFn, policy, env, upstream, reqPath }) {
   let parsed;
   try {
     parsed = JSON.parse(bodyBuffer.toString("utf8"));
@@ -254,6 +272,18 @@ async function prepareRequest(bodyBuffer, { routeFn, policy, env, upstream }) {
   const prompt = lastMessageContent(parsed);
   const category = categoryOf(parsed);
   const originalModel = typeof parsed?.model === "string" ? parsed.model : undefined;
+
+  // Checked FIRST, unconditionally, same priority as the body-based explicit-tier check
+  // below — Helicone's addressing IS the tier signal; the body's `model` is a real
+  // resolved id, never an alias, so it must never be rewritten for this gateway. This
+  // still routes tier-private through the exact same downstream buffering/judging
+  // logic as every other explicit tier (TIER_LADDER excludes it => never bufferable =>
+  // never judged), so the privacy pin's fail-closed guarantee is unchanged.
+  const pathTier = tierFromRouterPath(reqPath);
+  if (pathTier !== undefined) {
+    return { body: bodyBuffer, servedTier: pathTier, prompt, streaming, category };
+  }
+
   const canonicalModel = originalModel !== undefined ? canonicalTier(originalModel) : undefined;
 
   if (canonicalModel !== undefined && EXPLICIT_TIERS.has(canonicalModel)) {
@@ -366,7 +396,7 @@ export function createGatewayServer(opts = {}) {
         // CLIENT_ABORTED (or any other collection error): the client is already gone.
         return;
       }
-      const prepared = await prepareRequest(bodyBuffer, { routeFn, policy, env: opts.env, upstream: upstream.origin });
+      const prepared = await prepareRequest(bodyBuffer, { routeFn, policy, env: opts.env, upstream: upstream.origin, reqPath: req.url });
       outBody = prepared.body;
       servedTier = prepared.servedTier;
       prompt = prepared.prompt;
