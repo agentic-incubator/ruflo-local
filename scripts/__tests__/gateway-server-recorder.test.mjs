@@ -146,6 +146,31 @@ test("records category (metadata.agentType), tier, judge_score, and the D11 esca
   await closeAll(gateway, upstream);
 });
 
+test("records the canonical tier (not the raw resolved model id) for Helicone's /router/<name>/ path addressing", async () => {
+  // Real parity fix: before route-gateway recognized the URL path, this request's
+  // servedTier would have been the raw resolved model id ("ollama/qwen2.5:0.5b"),
+  // never matching TIER_LADDER — so the DRACO row would have carried the wrong tier
+  // (or the request wouldn't have been bufferable/recordable as a tier decision at all).
+  const { server: upstream } = startReflexFakeUpstream({ judgeScore: 1.0 }); // high score, no escalation noise
+  const upstreamPort = await listen(upstream);
+  let captured = null;
+  const recordFn = async (decision) => { captured = decision; };
+  const gateway = createGatewayServer({ upstream: `http://127.0.0.1:${upstreamPort}`, recordFn });
+  const gatewayPort = await listen(gateway);
+
+  const res = await request(gatewayPort, "/router/fast/chat/completions", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ model: "ollama/qwen2.5:0.5b", messages: [{ role: "user", content: "what is 2+2?" }] }),
+  });
+
+  assert.equal(res.status, 200);
+  assert.ok(captured, "recordFn should have been called");
+  assert.equal(captured.tier, "tier-fast");
+
+  await closeAll(gateway, upstream);
+});
+
 test("records judge_score:null, escalated:false, and category 'unrouted' for a non-scorable (tier-private) request with no agentType", async () => {
   const { server: upstream, port: upstreamPort } = await chatUpstream("private answer");
   let captured = null;

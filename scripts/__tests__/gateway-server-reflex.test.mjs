@@ -120,6 +120,47 @@ test("tier-private produces ZERO judge/escalation egress calls — the privacy p
   await closeAll(gateway, upstream);
 });
 
+test("escalates via Helicone's /router/fast/ path addressing, same as the model=tier-fast bypass", async () => {
+  // Real parity fix: Helicone requires the REAL resolved model id in the body (never
+  // an alias), so route-gateway must recognize the tier from the URL path instead —
+  // without that, this request would never be judged/escalated at all.
+  const { server: upstream, requests } = startReflexFakeUpstream({ judgeScore: 0.0 });
+  const upstreamPort = await listen(upstream);
+  const gateway = gw({ upstream: `http://127.0.0.1:${upstreamPort}` });
+  const gatewayPort = await listen(gateway);
+
+  const res = await request(gatewayPort, "/router/fast/chat/completions", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ model: "ollama/qwen2.5:0.5b", messages: [{ role: "user", content: "what is 2+2?" }] }),
+  });
+
+  const parsed = JSON.parse(res.body);
+  assert.equal(parsed.choices[0].message.content, "frontier answer");
+  assert.equal(requests.length, 4); // 1 serving + 2 judge passes + 1 escalation call
+
+  await closeAll(gateway, upstream);
+});
+
+test("/router/private/ path addressing produces ZERO judge/escalation egress calls — the privacy pin holds under Helicone too", async () => {
+  const { server: upstream, requests } = startReflexFakeUpstream({ judgeScore: 0.0, servedAnswer: "private answer" });
+  const upstreamPort = await listen(upstream);
+  const gateway = gw({ upstream: `http://127.0.0.1:${upstreamPort}` });
+  const gatewayPort = await listen(gateway);
+
+  const res = await request(gatewayPort, "/router/private/chat/completions", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ model: "ollama/qwen2.5:0.5b", messages: [{ role: "user", content: "my secret" }] }),
+  });
+
+  const parsed = JSON.parse(res.body);
+  assert.equal(parsed.choices[0].message.content, "private answer");
+  assert.equal(requests.length, 1, `expected exactly 1 egress call (the serving call), got ${requests.length}`);
+
+  await closeAll(gateway, upstream);
+});
+
 test("a mis-cased tier-private + agentType still produces ZERO egress calls (confirmed exploit, now fixed)", async () => {
   // Tier-3 pentest reproduction: {model:"Tier-Private", metadata:{agentType:"researcher"}}
   // used to fall through the exact-string bypass check, get routed to a real serving
