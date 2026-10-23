@@ -15,7 +15,7 @@ services:
   # natively on the host instead, set OLLAMA_API_BASE=http://host.docker.internal:11434
   # in .env, and start with:  docker compose up --scale ollama=0
   ollama:
-    image: ollama/ollama:latest
+    image: ollama/ollama:0.40.7@sha256:2e6cc92ffa43b4b1a2e70e315407e00ac97ec125afc71277d73c7efe01c4f31b
     container_name: ollama
     ports:
       - "11434:11434"
@@ -33,7 +33,7 @@ services:
 
   # --- Optional Tier-2 alternative: vLLM (NVIDIA GPU, high concurrency) -----
   vllm:
-    image: vllm/vllm-openai:latest
+    image: vllm/vllm-openai:v0.32.0@sha256:befccf0e7e4089aa23926bb6f887a85c0d46c2a99e6de5c5ffdf5cb7957c5b34
     container_name: vllm
     profiles: ["gpu"]
     ports:
@@ -105,7 +105,7 @@ services:
   # reaches this over the compose network by its service name.
   # See docs/guide/reference/gateway-variants.md.
   litellm:
-    image: ghcr.io/berriai/litellm:v1.83.14-stable  # PINNED (was floating main-stable=1.90.3, which hit the "healthy Ollama but router registers 0 deployments" bug — BerriAI/litellm#11330; main-stable is also deprecated as of 2026-06-30). Pin a content tag per LiteLLM guidance.
+    image: ghcr.io/berriai/litellm:v1.83.14-stable@sha256:c81eb79cd4333c6cfe374c0ec929110fd23f0ee5f7fd198855a6fbddc77b83ba  # PINNED (was floating main-stable=1.90.3, which hit the "healthy Ollama but router registers 0 deployments" bug — BerriAI/litellm#11330; main-stable is also deprecated as of 2026-06-30). Pin a content tag per LiteLLM guidance.
     container_name: litellm
     profiles: ["litellm"]
     depends_on:
@@ -131,7 +131,7 @@ services:
 
   # Postgres rides the litellm profile — only LiteLLM needs it for keys/budgets.
   litellm_db:
-    image: postgres:16-alpine
+    image: postgres:16-alpine@sha256:f4610795587492cd4fb887c2dc3de301b813278bb6f616992061141b5f15ac36
     container_name: litellm_db
     profiles: ["litellm"]
     environment:
@@ -158,7 +158,7 @@ services:
   # returns {"status":"ok"}) sidesteps the vendor bug entirely — logic unaffected, only
   # the broken shell wrapper is skipped.
   bifrost:
-    image: maximhq/bifrost:v1.5.2
+    image: maximhq/bifrost:v1.5.2@sha256:c13f2da2fb9209debe385a38241630e1d4a1734a8fa236ec8205e4a58a3985c0
     container_name: bifrost
     profiles: ["bifrost"]
     depends_on:
@@ -191,7 +191,7 @@ services:
   # binary — confirmed via `docker inspect`. Full binary path restores the real CLI
   # (`ai-gateway --help`: -c/--config <path>).
   helicone:
-    image: helicone/ai-gateway:0.2.0-beta.30
+    image: helicone/ai-gateway:0.2.0-beta.30@sha256:d8f3e79112fd319e139e9373d03d62b7eeb6aa8694be344ccad395c68d565906
     container_name: helicone
     profiles: ["helicone"]
     depends_on:
@@ -245,7 +245,7 @@ services:
   # collector config (spanmetrics dimensions + debug exporter both confirmed
   # live during the live-routing-cutover pipeline's phase-5 verification).
   otel-collector:
-    image: otel/opentelemetry-collector-contrib:0.155.0
+    image: otel/opentelemetry-collector-contrib:0.155.0@sha256:4935caa35e9a4cb387e35732e8fb22b2b5759af8d12e7043357f03837f6e8df5
     container_name: otel-collector
     volumes:
       - ./config/observability/otel-collector-config.yaml:/etc/otelcol-contrib/config.yaml:ro
@@ -256,7 +256,7 @@ services:
     restart: unless-stopped
 
   prometheus:
-    image: prom/prometheus:latest
+    image: prom/prometheus:v3.15.1@sha256:fa3302279710be2f21a8301ec17a8b4f2301fd829bd113839b3b6b02b6f191a2
     container_name: prometheus
     ports:
       - "9090:9090"
@@ -266,7 +266,7 @@ services:
     restart: unless-stopped
 
   grafana:
-    image: grafana/grafana:latest
+    image: grafana/grafana:13.2.4@sha256:dbbc38ea21103cefb50396340cd88afec779c7e070b0a7bf5a75b4ce46651d3f
     container_name: grafana
     ports:
       - "3000:3000"
