@@ -158,7 +158,7 @@ services:
   # returns {"status":"ok"}) sidesteps the vendor bug entirely — logic unaffected, only
   # the broken shell wrapper is skipped.
   bifrost:
-    image: maximhq/bifrost:v1.5.2@sha256:c13f2da2fb9209debe385a38241630e1d4a1734a8fa236ec8205e4a58a3985c0
+    image: maximhq/bifrost:v2.3.2@sha256:f5b18826349fe9e1c402c10d19f1cbb5567a3c800ad928580d07f72e69106ec7
     container_name: bifrost
     profiles: ["bifrost"]
     depends_on:
