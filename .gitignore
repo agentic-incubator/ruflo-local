@@ -21,6 +21,9 @@ ruvector.db
 *.db-wal
 *.db-shm
 
+# Test coverage output
+coverage/
+
 # ------------------------------------------------------------------------------
 # Secrets & credentials  (NEVER commit real secrets)
 # Keep the committed template: .env.example
