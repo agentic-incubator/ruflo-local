@@ -95,6 +95,18 @@ Thumbs.db
 Desktop.ini
 .autopilot/queued/
 agentdb.rvf*
+# Private learned stores and one machine's launchers: never commit them. AGENTS.md and CLAUDE.md stay tracked.
+# Ruflo (claude-flow) runtime state and swarm stores
+.hive-mind/
+# AgentDB and RuVector stores
+*.rvf
+*.rvf.lock
+*.rvf.manifest.json
+# Launchers onboarding points at this machine's installs (D6, D11): per machine, never shared
+.mcp.json.*
+.codex/
+# Leftover tool locks
+.beads.gate.lock
 
 # ruvector runtime corpus (real .rvf store — regenerated, not committed)
 .ruvector/
