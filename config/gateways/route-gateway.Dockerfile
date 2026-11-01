@@ -1,6 +1,6 @@
 # route-gateway — glibc Node 24 image so @ruvector/rvf and @ruvector/ruvllm resolve their
 # prebuilt linux-{x64,arm64}-gnu native bindings (node:*-alpine is musl and has none).
-FROM node:24-slim
+FROM node:24-slim@sha256:c86ecead9e55a5210ac1727de38a4ca840bf03dcaf34dc9749addbf383b1920c
 
 WORKDIR /app
 
